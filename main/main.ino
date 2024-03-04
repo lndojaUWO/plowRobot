@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include <MSE2202_Lib.h>
-#include "PlayArea.h"
 
 #define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
 #define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
@@ -17,76 +16,77 @@
 #define SMART_LED           21                                                 // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
 #define SMART_LED_COUNT     1                                                  // number of SMART LEDs in use
 
-#define TURN90DISTANCE      13                                                 // distance to turn 90 degrees
-#define PLOW_WIDTH          15                                                  // width of plow in cm
+// all distances are written in cm
+#define TURN90DISTANCE      12                                                 
+#define PLOW_WIDTH          15                                                 
 
 #define X_MAX               30
 #define Y_MAX               30
 
-unsigned char driveIndex;                                                      // state index for run mode
-unsigned int modePBDebounce;                                                   // pushbutton debounce timer count
-unsigned long previousMillis;                                                  // last microsecond count
-unsigned long currentMillis;                                                   // current microsecond count
 
-const int cPWMRes = 8;                                                         // bit resolution for PWM
-const int cMinPWM = 150;                                                       // PWM value for minimum speed that turns motor
-const int cMaxPWM = pow(2, cPWMRes) - 1;    
-const int cCountsRev = 1096;                                                   // encoder pulses per motor revolution
+unsigned int debounceTimer;                                                   
+unsigned long previousMillis;                                                  
+unsigned long currentMillis;                                                   
+
+const int PWM_Resolution = 8;                                                  // bit resolution
+const int MIN_PWM = 150;                                                       
+const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
+const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
 unsigned char leftDriveSpeed;                                                  // motor drive speed (0-255)
 unsigned char rightDriveSpeed;                                                 // motor drive speed (0-255)
 
 const int WHEEL_DIAMETER = 5;
 unsigned int  robotModeIndex = 0;                                              // robot operational state 
-enum DriveStage { STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN,TURN_RIGHT };
-int driveLoops[9] = {0,1,2,3,2,1,4,3,4};
-int driveLoopIndex = 0;
-bool stageComplete;
+enum DriveStage { STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN,TURN_RIGHT };     // enums that are used so i can use text names in the switch case instead of integers
+/*
+This array represents the actions the robot will take in one loop. 
+*/
+DriveStage driveLoops[9] = {STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN, TURN_LEFT, DRIVE_TO_END, TURN_RIGHT, NEXT_COLUMN, TURN_RIGHT};
+int driveLoopIndex = 0; // which stage in the driveLoop we are at
+bool stageComplete;     // if True, start the next stage in the loop
 int numLoops = 0;     
 
-
-Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  // Instance of Adafruit_NeoPixel for smart LED control
+Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  
 
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
-Motion Bot = Motion();                                                         // Instance of Motion for motor control
-Encoders LeftEncoder = Encoders();                                             // Instance of Encoders for left encoder data
-Encoders RightEncoder = Encoders();                                            // Instance of Encoders for right encoder data
+Motion Bot = Motion();                                                         
+Encoders LeftEncoder = Encoders();                                             
+Encoders RightEncoder = Encoders();                                            
 
 
 void setup() {
-   smartLED.begin();                                                           // Initialize the smart LED
-   smartLED.show();                                                            // Initialize all pixels to 'off'
+   smartLED.begin();                                                           
+   smartLED.show(); // Initialize all pixels to 'off'
    
   // Set up motors and encoders
-   Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); // set up motors as Drive 1
-   LeftEncoder.Begin(ENCODER_LEFT_A, ENCODER_LEFT_B, &Bot.iLeftMotorRunning ); // set up left encoder
-   RightEncoder.Begin(ENCODER_RIGHT_A, ENCODER_RIGHT_B, &Bot.iRightMotorRunning ); // set up right encoder
+   Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); 
+   LeftEncoder.Begin(ENCODER_LEFT_A, ENCODER_LEFT_B, &Bot.iLeftMotorRunning ); 
+   RightEncoder.Begin(ENCODER_RIGHT_A, ENCODER_RIGHT_B, &Bot.iRightMotorRunning ); 
+   pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);
+   pinMode(MODE_BUTTON, INPUT_PULLUP);
 
-   pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);                                 // set up motor enable switch with internal pullup
-   pinMode(MODE_BUTTON, INPUT_PULLUP);                                         // Set up mode pushbutton
-   modePBDebounce = 0;                                                         // reset debounce timer count
+   debounceTimer = 0;
    //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
    numLoops = 1;
    stageComplete = false;
 }
 
 void loop() {
-   long pos[] = {0, 0};                                                        // current motor positions
-   int pot = 0;                                                                // raw ADC value from pot
+   long motorPosition[] = {0, 0}; // represented in encouder counts
+   int potentiometer = 0; // raw ADC value from potentiometer
 
-   noInterrupts();                                                             // disable interrupts temporarily while reading
+   noInterrupts();                                                             
    LeftEncoder.getEncoderRawCount();
    RightEncoder.getEncoderRawCount();
-   pos[0] = LeftEncoder.lRawEncoderCount;                                                 // read and store current motor position
-   pos[1] = RightEncoder.lRawEncoderCount;
-   interrupts();                                                               // turn interrupts back on
+   motorPosition[0] = LeftEncoder.lRawEncoderCount;                                                 
+   motorPosition[1] = RightEncoder.lRawEncoderCount;
+   interrupts();                                                               
 
    buttonDebounce();
 
-
-   
    if (robotModeIndex == 0 or driveLoopIndex == 9){
          Bot.Stop("D1");
-         LeftEncoder.clearEncoder();                                        // clear encoder counts
+         LeftEncoder.clearEncoder();                                        
          RightEncoder.clearEncoder();
          // set leds to red
          setLedColor(255, 0, 0);
@@ -96,10 +96,17 @@ void loop() {
          robotModeIndex = 0;
    }
    else{
+      potentiometer = analogRead(POT_R1);
+      leftDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+      rightDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+      /*
+      This switch case determines what the robot will do in each stage
+      
+      */
       switch(driveLoops[driveLoopIndex]) {
          case STOP:
             Bot.Stop("D1");
-            LeftEncoder.clearEncoder();                                        // clear encoder counts
+            LeftEncoder.clearEncoder();                                        
             RightEncoder.clearEncoder();
             // set leds to red
             setLedColor(255, 0, 0);
@@ -108,87 +115,47 @@ void loop() {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            pot = analogRead(POT_R1);
-            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            if (driveTo(Y_MAX, leftDriveSpeed, pos[0])){
+            if (driveTo(Y_MAX, leftDriveSpeed, motorPosition[0])){
                   stageComplete = true;                  
             }
             break;
          case TURN_LEFT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            pot = analogRead(POT_R1);
-            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            if (turnLeft(TURN90DISTANCE, leftDriveSpeed, pos[0])){
+            if (turnLeft(TURN90DISTANCE, leftDriveSpeed, motorPosition[0])){
                   stageComplete = true;
             }
             break;
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            pot = analogRead(POT_R1);
-            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            if (driveTo(PLOW_WIDTH, leftDriveSpeed, pos[0])){
+            if (driveTo(PLOW_WIDTH, leftDriveSpeed, motorPosition[0])){
                   stageComplete = true;
             }
             break;
          case TURN_RIGHT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            pot = analogRead(POT_R1);
-            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            if (turnRight(TURN90DISTANCE, leftDriveSpeed, pos[1])){
+            if (turnRight(TURN90DISTANCE, leftDriveSpeed, motorPosition[1])){
                   stageComplete = true;
             }
             break;
       }
       if (stageComplete){
-         driveLoopIndex = nextStage();
+         driveLoopIndex = nextStage(); // finds out what stage the robot must do next
       }
    }
 }
 
-
-void buttonDebounce(){
-    // Mode pushbutton debounce and toggle
-   if (!digitalRead(MODE_BUTTON)) {                                         // if pushbutton GPIO goes LOW (nominal push)
-      // Start debounce
-      if (modePBDebounce <= 25) {                                           // 25 millisecond debounce time
-         modePBDebounce = modePBDebounce + 1;                               // increment debounce timer count
-         if (modePBDebounce > 25) {                                         // if held for at least 25 mS
-            modePBDebounce = 1000;                                          // change debounce timer count to 1 second
-         }
-      }
-      if (modePBDebounce >= 1000) {                                         // maintain 1 second timer count until release
-         modePBDebounce = 1000;
-      }
-   }
-   else {                                                                   // pushbutton GPIO goes HIGH (nominal release)
-      if(modePBDebounce <= 26) {                                            // if release occurs within debounce interval
-         modePBDebounce = 0;                                                // reset debounce timer count
-      }
-      else {
-         modePBDebounce = modePBDebounce + 1;                               // increment debounce timer count
-         if(modePBDebounce >= 1025) {                                       // if pushbutton was released for 25 mS
-            modePBDebounce = 0;                                             // reset debounce timer count
-            previousMillis = millis();
-            robotModeIndex == 0 ? robotModeIndex = 1 : robotModeIndex = 0; // toggle robot operational state
-         }
-      }
-   }
+// returns the number of encoder counts needed to drive a certain distance
+long getCM(long inCM){ 
+   return(inCM * PULSES_PER_REVOLUTION / (WHEEL_DIAMETER * 3.14159));
 }
 
-long getCM(long inCM){ // input distance in cm and it returns the correct encoder value
-   return(inCM * cCountsRev / (WHEEL_DIAMETER * 3.14159));
-}
-
-bool driveTo(int distance, unsigned char speed, long pos){
-   if(pos < getCM(distance)){ 
-      Bot.Forward("D1", speed, speed); // drive ID, left speed, right speed  
+// input a distance in cm and it will drive forward that amount
+bool driveTo(int distance, unsigned char speed, long motorPosition){
+   if(motorPosition < getCM(distance)){ 
+      Bot.Forward("D1", speed, speed);  
       return false;
    }
    else{
@@ -199,11 +166,9 @@ bool driveTo(int distance, unsigned char speed, long pos){
    }
 }
 
-/*
-   when turning, use pos[1] when turning right, and pos[0] when turning left
-*/
-bool turnRight(int distance, unsigned char speed, long pos){
-   if(pos < getCM(distance)){
+
+bool turnRight(int distance, unsigned char speed, long motorPosition){
+   if(motorPosition < getCM(distance)){
       Bot.Left("D1", speed, speed); // misleading, bot.left turns it to the right
       return false;
    }
@@ -215,9 +180,9 @@ bool turnRight(int distance, unsigned char speed, long pos){
    }
 }
 
-bool turnLeft(int distance, unsigned char speed, long pos){
-   pos = -pos;
-   if(pos < getCM(distance)){
+bool turnLeft(int distance, unsigned char speed, long motorPosition){
+   motorPosition = -motorPosition;
+   if(motorPosition < getCM(distance)){
       Bot.Right("D1", speed, speed); // misleading, bot.right turns it to the left
       return false;
    }
@@ -244,9 +209,9 @@ int nextStage(){
    if(stageComplete){
       stageComplete = false;
       driveLoopIndex++;
-      if (driveLoopIndex == 9){
+      if (driveLoopIndex == 9){ // if we have finished the loop
          if (numLoops == 0){
-            return 9;
+            return 9; // if we have done all the loops we return 9 to indicate that we are done
          }
          else{
             numLoops--;
@@ -255,6 +220,37 @@ int nextStage(){
       }
    }
    return driveLoopIndex;
+}
+
+// placed into the depths so we dont have to look at it
+// reads the button and toggles the robot mode
+void buttonDebounce(){
+    // Mode pushbutton debounce and toggle
+   if (!digitalRead(MODE_BUTTON)) {                                         // if pushbutton GPIO goes LOW (nominal push)
+      // Start debounce
+      if (debounceTimer <= 25) {                                           // 25 millisecond debounce time
+         debounceTimer = debounceTimer + 1;                               // increment debounce timer count
+         if (debounceTimer > 25) {                                         // if held for at least 25 mS
+            debounceTimer = 1000;                                          // change debounce timer count to 1 second
+         }
+      }
+      if (debounceTimer >= 1000) {                                         // maintain 1 second timer count until release
+         debounceTimer = 1000;
+      }
+   }
+   else {                                                                   // pushbutton GPIO goes HIGH (nominal release)
+      if(debounceTimer <= 26) {                                            // if release occurs within debounce interval
+         debounceTimer = 0;                                                // reset debounce timer count
+      }
+      else {
+         debounceTimer = debounceTimer + 1;                               // increment debounce timer count
+         if(debounceTimer >= 1025) {                                       // if pushbutton was released for 25 mS
+            debounceTimer = 0;                                             // reset debounce timer count
+            previousMillis = millis();
+            robotModeIndex == 0 ? robotModeIndex = 1 : robotModeIndex = 0; // toggle robot operational state
+         }
+      }
+   }
 }
 
 
