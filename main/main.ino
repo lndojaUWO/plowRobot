@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include <MSE2202_Lib.h>
-
+#include "PlayArea.h"
 
 #define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
 #define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
@@ -17,6 +17,12 @@
 #define SMART_LED           21                                                 // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
 #define SMART_LED_COUNT     1                                                  // number of SMART LEDs in use
 
+#define TURN90DISTANCE      13                                                 // distance to turn 90 degrees
+#define PLOW_WIDTH          15                                                  // width of plow in cm
+
+#define X_MAX               30
+#define Y_MAX               30
+
 unsigned char driveIndex;                                                      // state index for run mode
 unsigned int modePBDebounce;                                                   // pushbutton debounce timer count
 unsigned long previousMillis;                                                  // last microsecond count
@@ -30,17 +36,25 @@ unsigned char leftDriveSpeed;                                                  /
 unsigned char rightDriveSpeed;                                                 // motor drive speed (0-255)
 
 const int WHEEL_DIAMETER = 5;
-unsigned int  robotModeIndex = 0;                                              // robot operational state                              
+unsigned int  robotModeIndex = 0;                                              // robot operational state 
+enum DriveStage { STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN,TURN_RIGHT };
+int driveLoops[9] = {0,1,2,3,2,1,4,3,4};
+int driveLoopIndex = 0;
+bool stageComplete;
+int numLoops = 0;     
+
+
+Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  // Instance of Adafruit_NeoPixel for smart LED control
 
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
 Motion Bot = Motion();                                                         // Instance of Motion for motor control
 Encoders LeftEncoder = Encoders();                                             // Instance of Encoders for left encoder data
 Encoders RightEncoder = Encoders();                                            // Instance of Encoders for right encoder data
 
+
 void setup() {
-#if defined DEBUG_DRIVE_SPEED || DEBUG_ENCODER_COUNT
-   Serial.begin(115200);
-#endif
+   smartLED.begin();                                                           // Initialize the smart LED
+   smartLED.show();                                                            // Initialize all pixels to 'off'
    
   // Set up motors and encoders
    Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); // set up motors as Drive 1
@@ -50,6 +64,9 @@ void setup() {
    pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);                                 // set up motor enable switch with internal pullup
    pinMode(MODE_BUTTON, INPUT_PULLUP);                                         // Set up mode pushbutton
    modePBDebounce = 0;                                                         // reset debounce timer count
+   //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
+   numLoops = 1;
+   stageComplete = false;
 }
 
 void loop() {
@@ -63,31 +80,76 @@ void loop() {
    pos[1] = RightEncoder.lRawEncoderCount;
    interrupts();                                                               // turn interrupts back on
 
-   currentMillis = millis();
    buttonDebounce();
 
-    switch(robotModeIndex) {
-        case 0:
+
+   
+   if (robotModeIndex == 0 or driveLoopIndex == 9){
+         Bot.Stop("D1");
+         LeftEncoder.clearEncoder();                                        // clear encoder counts
+         RightEncoder.clearEncoder();
+         // set leds to red
+         setLedColor(255, 0, 0);
+         //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
+         numLoops = 1;
+         driveLoopIndex = 0;
+         robotModeIndex = 0;
+   }
+   else{
+      switch(driveLoops[driveLoopIndex]) {
+         case STOP:
             Bot.Stop("D1");
             LeftEncoder.clearEncoder();                                        // clear encoder counts
             RightEncoder.clearEncoder();
+            // set leds to red
+            setLedColor(255, 0, 0);
+            stageComplete = true;
             break;
-        case 1:
+         case DRIVE_TO_END:
+            // set leds to green
+            setLedColor(0, 255, 0);
             pot = analogRead(POT_R1);
             leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
             rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
-            if(pos[0] < getCM(20)){ 
-                        Bot.Forward("D1", leftDriveSpeed, rightDriveSpeed); // drive ID, left speed, right speed  
-                     }
-                     else{
-                        Bot.Stop("D1");
-                        LeftEncoder.clearEncoder();
-                        RightEncoder.clearEncoder();
-                        robotModeIndex = 0;
-                     }          
-
-    }
-
+            if (driveTo(Y_MAX, leftDriveSpeed, pos[0])){
+                  stageComplete = true;                  
+            }
+            break;
+         case TURN_LEFT:
+            // set leds to blue
+            setLedColor(0, 0, 255);
+            pot = analogRead(POT_R1);
+            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            if (turnLeft(TURN90DISTANCE, leftDriveSpeed, pos[0])){
+                  stageComplete = true;
+            }
+            break;
+         case NEXT_COLUMN:
+            // set leds to yellow
+            setLedColor(255, 255, 0);
+            pot = analogRead(POT_R1);
+            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            if (driveTo(PLOW_WIDTH, leftDriveSpeed, pos[0])){
+                  stageComplete = true;
+            }
+            break;
+         case TURN_RIGHT:
+            // set leds to blue
+            setLedColor(0, 0, 255);
+            pot = analogRead(POT_R1);
+            leftDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            rightDriveSpeed = map(pot, 0, 4095, cMinPWM, cMaxPWM);
+            if (turnRight(TURN90DISTANCE, leftDriveSpeed, pos[1])){
+                  stageComplete = true;
+            }
+            break;
+      }
+      if (stageComplete){
+         driveLoopIndex = nextStage();
+      }
+   }
 }
 
 
@@ -114,8 +176,7 @@ void buttonDebounce(){
          if(modePBDebounce >= 1025) {                                       // if pushbutton was released for 25 mS
             modePBDebounce = 0;                                             // reset debounce timer count
             previousMillis = millis();
-            robotModeIndex++;                                               // switch to next mode
-            robotModeIndex = robotModeIndex & 7;                            // keep mode index between 0 and 7
+            robotModeIndex == 0 ? robotModeIndex = 1 : robotModeIndex = 0; // toggle robot operational state
          }
       }
    }
@@ -124,3 +185,77 @@ void buttonDebounce(){
 long getCM(long inCM){ // input distance in cm and it returns the correct encoder value
    return(inCM * cCountsRev / (WHEEL_DIAMETER * 3.14159));
 }
+
+bool driveTo(int distance, unsigned char speed, long pos){
+   if(pos < getCM(distance)){ 
+      Bot.Forward("D1", speed, speed); // drive ID, left speed, right speed  
+      return false;
+   }
+   else{
+      Bot.Stop("D1");
+      LeftEncoder.clearEncoder();
+      RightEncoder.clearEncoder();
+      return true;
+   }
+}
+
+/*
+   when turning, use pos[1] when turning right, and pos[0] when turning left
+*/
+bool turnRight(int distance, unsigned char speed, long pos){
+   if(pos < getCM(distance)){
+      Bot.Left("D1", speed, speed); // misleading, bot.left turns it to the right
+      return false;
+   }
+   else{
+      Bot.Stop("D1");
+      LeftEncoder.clearEncoder();
+      RightEncoder.clearEncoder();
+      return true;
+   }
+}
+
+bool turnLeft(int distance, unsigned char speed, long pos){
+   pos = -pos;
+   if(pos < getCM(distance)){
+      Bot.Right("D1", speed, speed); // misleading, bot.right turns it to the left
+      return false;
+   }
+   else{
+      Bot.Stop("D1");
+      LeftEncoder.clearEncoder();
+      RightEncoder.clearEncoder();
+      return true;
+   }
+}
+
+void setLedColor(int r, int g, int b){
+   if (smartLED.getPixelColor(0) != smartLED.Color(r, g, b)){
+      smartLED.setPixelColor(0, smartLED.Color(r, g, b));
+      smartLED.show();
+   }
+}
+
+int numberOfLoops(int xMax, int plowWidth){
+   return xMax / plowWidth;
+}
+
+int nextStage(){
+   if(stageComplete){
+      stageComplete = false;
+      driveLoopIndex++;
+      if (driveLoopIndex == 9){
+         if (numLoops == 0){
+            return 9;
+         }
+         else{
+            numLoops--;
+            driveLoopIndex = 0;
+         }
+      }
+   }
+   return driveLoopIndex;
+}
+
+
+
