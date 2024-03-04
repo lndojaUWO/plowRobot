@@ -99,8 +99,12 @@ void loop() {
       potentiometer = analogRead(POT_R1);
       leftDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
       rightDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+      
       /*
       This switch case determines what the robot will do in each stage
+      for reference one loop is: 
+
+      STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN, TURN_LEFT, DRIVE_TO_END, TURN_RIGHT, NEXT_COLUMN, TURN_RIGHT
       
       */
       switch(driveLoops[driveLoopIndex]) {
