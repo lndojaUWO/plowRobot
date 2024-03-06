@@ -74,6 +74,7 @@ void setup() {
    pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);
    pinMode(MODE_BUTTON, INPUT_PULLUP);
 
+  Wire.begin(47,48);
    // connect to mpu
    if (!mpu.begin()) {
       Serial.println("Failed to find MPU6050 chip");
