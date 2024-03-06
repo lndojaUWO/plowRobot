@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include <MSE2202_Lib.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
 
 #define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
 #define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
@@ -51,10 +54,16 @@ Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_G
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
 Motion Bot = Motion();                                                         
 Encoders LeftEncoder = Encoders();                                             
-Encoders RightEncoder = Encoders();                                            
+Encoders RightEncoder = Encoders();         
 
+// MPU6050 IMU Sensor
+Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
+float lastRotationalVelocity = 0;
+int angle = 0;
+bool measureAngle = false;
 
 void setup() {
+   Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
    
@@ -65,10 +74,24 @@ void setup() {
    pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);
    pinMode(MODE_BUTTON, INPUT_PULLUP);
 
+   // connect to mpu
+   if (!mpu.begin()) {
+      Serial.println("Failed to find MPU6050 chip");
+      while (1) {
+         delay(10);
+      }
+   }
+
+   mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+
    debounceTimer = 0;
    //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
    numLoops = 1;
    stageComplete = false;
+
+   previousMillis = millis();
 }
 
 void loop() {
@@ -83,6 +106,13 @@ void loop() {
    interrupts();                                                               
 
    buttonDebounce();
+   currentMillis = millis();
+
+   if (currentMillis - previousMillis >= 50) {
+      previousMillis = millis();
+      readMPU(50);
+   }
+
 
    if (robotModeIndex == 0 or driveLoopIndex == 9){
          Bot.Stop("D1");
@@ -99,7 +129,7 @@ void loop() {
       potentiometer = analogRead(POT_R1);
       leftDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
       rightDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
-      
+
       /*
       This switch case determines what the robot will do in each stage
       for reference one loop is: 
@@ -126,7 +156,7 @@ void loop() {
          case TURN_LEFT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnLeft(TURN90DISTANCE, leftDriveSpeed, motorPosition[0])){
+            if (turnTo(-1.5708, leftDriveSpeed, false)){
                   stageComplete = true;
             }
             break;
@@ -140,7 +170,7 @@ void loop() {
          case TURN_RIGHT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnRight(TURN90DISTANCE, leftDriveSpeed, motorPosition[1])){
+            if (turnTo(1.5708, leftDriveSpeed, true)){
                   stageComplete = true;
             }
             break;
@@ -150,6 +180,37 @@ void loop() {
       }
    }
 }
+
+
+
+
+void readMPU(long sampleTime){
+   sensors_event_t a , g, temp;
+   mpu.getEvent(&a, &g, &temp);
+
+   float currentRotationalVelocity = g.gyro.z;
+   float averageRotationalVelocity = (currentRotationalVelocity + lastRotationalVelocity) / 2;
+   float changeInAngle = averageRotationalVelocity * sampleTime; // 0.05 is the time between each loop in seconds
+   
+   measureAngle == true ? angle += changeInAngle : angle = 0;
+}
+
+bool turnTo(int setAngle, unsigned char speed, bool turningRight){
+   Serial.println(angle);
+   if(abs(angle) < abs(setAngle)){
+      measureAngle = true;
+      turningRight == true ? Bot.Left("D1", speed, speed) : Bot.Right("D1", speed, speed); // misleading, bot.left turns it to the right
+      return false;
+   }
+   else{
+      measureAngle = false;
+      Bot.Stop("D1");
+      LeftEncoder.clearEncoder();
+      RightEncoder.clearEncoder();
+      return true;
+   }
+}
+
 
 // returns the number of encoder counts needed to drive a certain distance
 long getCM(long inCM){ 
