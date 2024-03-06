@@ -28,8 +28,8 @@
 
 
 unsigned int debounceTimer;                                                   
-unsigned long previousMillis;                                                  
-unsigned long currentMillis;                                                   
+unsigned long previousMillisGyro;                                                  
+unsigned long currentMillisGyro;                                                   
 
 const int PWM_Resolution = 8;                                                  // bit resolution
 const int MIN_PWM = 150;                                                       
@@ -58,8 +58,7 @@ Encoders RightEncoder = Encoders();
 
 // MPU6050 IMU Sensor
 Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
-float lastRotationalVelocity = 0;
-int angle = 0;
+float angle = 0;
 bool measureAngle = false;
 
 void setup() {
@@ -92,7 +91,7 @@ void setup() {
    numLoops = 1;
    stageComplete = false;
 
-   previousMillis = millis();
+   previousMillisGyro = millis();
 }
 
 void loop() {
@@ -107,12 +106,9 @@ void loop() {
    interrupts();                                                               
 
    buttonDebounce();
-   currentMillis = millis();
+   readMPU();
 
-   if (currentMillis - previousMillis >= 50) {
-      previousMillis = millis();
-      readMPU(50);
-   }
+  
 
 
    if (robotModeIndex == 0 or driveLoopIndex == 9){
@@ -157,7 +153,7 @@ void loop() {
          case TURN_LEFT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnTo(-1.5708, leftDriveSpeed, false)){
+            if (turnTo(90, leftDriveSpeed, false)){
                   stageComplete = true;
             }
             break;
@@ -171,7 +167,7 @@ void loop() {
          case TURN_RIGHT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnTo(1.5708, leftDriveSpeed, true)){
+            if (turnTo(-90, leftDriveSpeed, true)){
                   stageComplete = true;
             }
             break;
@@ -185,15 +181,16 @@ void loop() {
 
 
 
-void readMPU(long sampleTime){
+void readMPU(){
    sensors_event_t a , g, temp;
    mpu.getEvent(&a, &g, &temp);
 
-   float currentRotationalVelocity = g.gyro.z;
-   float averageRotationalVelocity = (currentRotationalVelocity + lastRotationalVelocity) / 2;
-   float changeInAngle = averageRotationalVelocity * sampleTime; // 0.05 is the time between each loop in seconds
-   
+   float angularVelocity = g.gyro.z;
+   currentMillisGyro = millis();
+   float changeInAngle = angularVelocity * (currentMillisGyro - previousMillisGyro) / 1000;
+   changeInAngle = RAD_TO_DEG * changeInAngle;
    measureAngle == true ? angle += changeInAngle : angle = 0;
+   previousMillisGyro = currentMillisGyro;
 }
 
 bool turnTo(int setAngle, unsigned char speed, bool turningRight){
@@ -312,7 +309,6 @@ void buttonDebounce(){
          debounceTimer = debounceTimer + 1;                               // increment debounce timer count
          if(debounceTimer >= 1025) {                                       // if pushbutton was released for 25 mS
             debounceTimer = 0;                                             // reset debounce timer count
-            previousMillis = millis();
             robotModeIndex == 0 ? robotModeIndex = 1 : robotModeIndex = 0; // toggle robot operational state
          }
       }
