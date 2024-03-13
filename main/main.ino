@@ -26,6 +26,8 @@
 #define X_MAX               30
 #define Y_MAX               30
 
+#define KP                  500
+
 
 unsigned int debounceTimer;                                                   
 unsigned long previousMillisGyro;                                                  
@@ -60,6 +62,7 @@ Encoders RightEncoder = Encoders();
 Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
 float angle = 0;
 bool measureAngle = false;
+float xAcceleration = 0;
 
 void setup() {
    Serial.begin(115200);
@@ -146,7 +149,7 @@ void loop() {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            if (driveTo(Y_MAX, leftDriveSpeed, motorPosition[0])){
+            if (driveTo(Y_MAX, leftDriveSpeed, rightDriveSpeed, motorPosition[0])){
                   stageComplete = true;                  
             }
             break;
@@ -160,7 +163,7 @@ void loop() {
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            if (driveTo(PLOW_WIDTH, leftDriveSpeed, motorPosition[0])){
+            if (driveTo(PLOW_WIDTH, leftDriveSpeed, rightDriveSpeed, motorPosition[0])){
                   stageComplete = true;
             }
             break;
@@ -178,12 +181,24 @@ void loop() {
    }
 }
 
+int* straightDriveSpeeds(unsigned char leftDriveSpeed, unsigned char rightDriveSpeed){
 
+   int correction = KP * xAcceleration;
+   int leftSpeed = leftDriveSpeed + correction;
+   int rightSpeed = rightDriveSpeed - correction;
 
+   leftSpeed > MAX_PWM ? leftSpeed = MAX_PWM : leftSpeed = leftSpeed;
+   rightSpeed > MAX_PWM ? rightSpeed = MAX_PWM : rightSpeed = rightSpeed;
+
+   int speeds[2] = {leftSpeed, rightSpeed};
+   return speeds;
+}
 
 void readMPU(){
    sensors_event_t a , g, temp;
    mpu.getEvent(&a, &g, &temp);
+
+   xAcceleration = a.acceleration.x;   
 
    float angularVelocity = g.gyro.z;
    currentMillisGyro = millis();
@@ -209,44 +224,20 @@ bool turnTo(int setAngle, unsigned char speed, bool turningRight){
    }
 }
 
-
 // returns the number of encoder counts needed to drive a certain distance
 long getCM(long inCM){ 
    return(inCM * PULSES_PER_REVOLUTION / (WHEEL_DIAMETER * 3.14159));
 }
 
 // input a distance in cm and it will drive forward that amount
-bool driveTo(int distance, unsigned char speed, long motorPosition){
+bool driveTo(int distance, unsigned char leftSpeed, unsigned char rightSpeed, long motorPosition){
+
+   int* speeds = straightDriveSpeeds(leftSpeed, rightSpeed);
+   int leftSpeed = speeds[0];
+   int rightSpeed = speeds[1];
+
    if(motorPosition < getCM(distance)){ 
-      Bot.Forward("D1", speed, speed);  
-      return false;
-   }
-   else{
-      Bot.Stop("D1");
-      LeftEncoder.clearEncoder();
-      RightEncoder.clearEncoder();
-      return true;
-   }
-}
-
-
-bool turnRight(int distance, unsigned char speed, long motorPosition){
-   if(motorPosition < getCM(distance)){
-      Bot.Left("D1", speed, speed); // misleading, bot.left turns it to the right
-      return false;
-   }
-   else{
-      Bot.Stop("D1");
-      LeftEncoder.clearEncoder();
-      RightEncoder.clearEncoder();
-      return true;
-   }
-}
-
-bool turnLeft(int distance, unsigned char speed, long motorPosition){
-   motorPosition = -motorPosition;
-   if(motorPosition < getCM(distance)){
-      Bot.Right("D1", speed, speed); // misleading, bot.right turns it to the left
+      Bot.Forward("D1", leftSpeed, rightSpeed);  
       return false;
    }
    else{
