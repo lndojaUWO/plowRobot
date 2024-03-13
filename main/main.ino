@@ -112,15 +112,16 @@ void loop() {
 
 
    if (robotModeIndex == 0 or driveLoopIndex == 9){
-         Bot.Stop("D1");
-         LeftEncoder.clearEncoder();                                        
-         RightEncoder.clearEncoder();
-         // set leds to red
-         setLedColor(255, 0, 0);
-         //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
-         numLoops = 1;
-         driveLoopIndex = 0;
-         robotModeIndex = 0;
+      measureAngle = true;
+      Bot.Stop("D1");
+      LeftEncoder.clearEncoder();                                        
+      RightEncoder.clearEncoder();
+      // set leds to red
+      setLedColor(255, 0, 0);
+      //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
+      numLoops = 1;
+      driveLoopIndex = 0;
+      robotModeIndex = 0;
    }
    else{
       potentiometer = analogRead(POT_R1);
@@ -186,11 +187,13 @@ void readMPU(){
    mpu.getEvent(&a, &g, &temp);
 
    float angularVelocity = g.gyro.z;
+   angularVelocity += 0.0048;
    currentMillisGyro = millis();
    float changeInAngle = angularVelocity * (currentMillisGyro - previousMillisGyro) / 1000;
    changeInAngle = RAD_TO_DEG * changeInAngle;
    measureAngle == true ? angle += changeInAngle : angle = 0;
    previousMillisGyro = currentMillisGyro;
+   Serial.println(angle);
 }
 
 bool turnTo(int setAngle, unsigned char speed, bool turningRight){
