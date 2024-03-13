@@ -26,7 +26,12 @@
 #define X_MAX               30
 #define Y_MAX               30
 
-#define KP                  500
+#define KP                  10
+#define KI                  0
+#define KD                  0   
+int integral = 0;        
+float derivative = 0;
+float lastError = 0;
 
 
 unsigned int debounceTimer;                                                   
@@ -37,8 +42,9 @@ const int PWM_Resolution = 8;                                                  /
 const int MIN_PWM = 150;                                                       
 const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
 const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
-unsigned char leftDriveSpeed;                                                  // motor drive speed (0-255)
-unsigned char rightDriveSpeed;                                                 // motor drive speed (0-255)
+unsigned char leftDriveSpeed = 0;                                                  
+unsigned char rightDriveSpeed = 0;                                                 
+unsigned char targetSpeed;
 
 const int WHEEL_DIAMETER = 5;
 unsigned int  robotModeIndex = 0;                                              // robot operational state 
@@ -62,10 +68,10 @@ Encoders RightEncoder = Encoders();
 Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
 float angle = 0;
 bool measureAngle = false;
-float xAcceleration = 0;
+float yAcceleration = 0;
 
 void setup() {
-   Serial.begin(115200);
+   //Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
    
@@ -127,8 +133,8 @@ void loop() {
    }
    else{
       potentiometer = analogRead(POT_R1);
-      leftDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
-      rightDriveSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+      targetSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+
 
       /*
       This switch case determines what the robot will do in each stage
@@ -149,28 +155,28 @@ void loop() {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            if (driveTo(Y_MAX, leftDriveSpeed, rightDriveSpeed, motorPosition[0])){
+            if (driveTo(Y_MAX, motorPosition[0])){
                   stageComplete = true;                  
             }
             break;
          case TURN_LEFT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnTo(90, leftDriveSpeed, false)){
+            if (turnTo(90, false)){
                   stageComplete = true;
             }
             break;
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            if (driveTo(PLOW_WIDTH, leftDriveSpeed, rightDriveSpeed, motorPosition[0])){
+            if (driveTo(PLOW_WIDTH, motorPosition[0])){
                   stageComplete = true;
             }
             break;
          case TURN_RIGHT:
             // set leds to blue
             setLedColor(0, 0, 255);
-            if (turnTo(-90, leftDriveSpeed, true)){
+            if (turnTo(-90, true)){
                   stageComplete = true;
             }
             break;
@@ -181,24 +187,27 @@ void loop() {
    }
 }
 
-int* straightDriveSpeeds(unsigned char leftDriveSpeed, unsigned char rightDriveSpeed){
+void straightDriveSpeeds(){
 
-   int correction = KP * xAcceleration;
-   int leftSpeed = leftDriveSpeed + correction;
-   int rightSpeed = rightDriveSpeed - correction;
+   float error = angle;
+   error < 0.01 and error > -0.05 ? integral = 0 : integral += error;
+   derivative = error - lastError;
+   lastError = error;
 
-   leftSpeed > MAX_PWM ? leftSpeed = MAX_PWM : leftSpeed = leftSpeed;
-   rightSpeed > MAX_PWM ? rightSpeed = MAX_PWM : rightSpeed = rightSpeed;
+   int correction = (KP * error + KI * integral + KD * derivative) * -1;
+   leftDriveSpeed = targetSpeed + correction;
+   rightDriveSpeed = targetSpeed - correction;
 
-   int speeds[2] = {leftSpeed, rightSpeed};
-   return speeds;
+   leftDriveSpeed > MAX_PWM ? leftDriveSpeed = MAX_PWM : leftDriveSpeed = leftDriveSpeed;
+   rightDriveSpeed > MAX_PWM ? rightDriveSpeed = MAX_PWM : rightDriveSpeed = rightDriveSpeed;
+
 }
 
 void readMPU(){
    sensors_event_t a , g, temp;
    mpu.getEvent(&a, &g, &temp);
 
-   xAcceleration = a.acceleration.x;   
+   yAcceleration = a.acceleration.y;   
 
    float angularVelocity = g.gyro.z;
    currentMillisGyro = millis();
@@ -208,11 +217,10 @@ void readMPU(){
    previousMillisGyro = currentMillisGyro;
 }
 
-bool turnTo(int setAngle, unsigned char speed, bool turningRight){
-   Serial.println(angle);
+bool turnTo(int setAngle, bool turningRight){
    if(abs(angle) < abs(setAngle)){
       measureAngle = true;
-      turningRight == true ? Bot.Left("D1", speed, speed) : Bot.Right("D1", speed, speed); // misleading, bot.left turns it to the right
+      turningRight == true ? Bot.Left("D1", targetSpeed, targetSpeed) : Bot.Right("D1", targetSpeed, targetSpeed); // misleading, bot.left turns it to the right
       return false;
    }
    else{
@@ -230,17 +238,17 @@ long getCM(long inCM){
 }
 
 // input a distance in cm and it will drive forward that amount
-bool driveTo(int distance, unsigned char leftSpeed, unsigned char rightSpeed, long motorPosition){
+bool driveTo(int distance, long motorPosition){
 
-   int* speeds = straightDriveSpeeds(leftSpeed, rightSpeed);
-   int leftSpeed = speeds[0];
-   int rightSpeed = speeds[1];
+   straightDriveSpeeds();
 
    if(motorPosition < getCM(distance)){ 
-      Bot.Forward("D1", leftSpeed, rightSpeed);  
+      measureAngle = true;
+      Bot.Forward("D1", leftDriveSpeed, rightDriveSpeed);  
       return false;
    }
    else{
+      measureAngle = false;
       Bot.Stop("D1");
       LeftEncoder.clearEncoder();
       RightEncoder.clearEncoder();
