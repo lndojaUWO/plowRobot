@@ -26,9 +26,9 @@
 #define X_MAX               30
 #define Y_MAX               30
 
-#define KP                  10
+#define KP                  5
 #define KI                  0
-#define KD                  0   
+#define KD                  1   
 int integral = 0;        
 float derivative = 0;
 float lastError = 0;
@@ -210,6 +210,7 @@ void readMPU(){
    yAcceleration = a.acceleration.y;   
 
    float angularVelocity = g.gyro.z;
+   angularVelocity += 0.0048; // offset
    currentMillisGyro = millis();
    float changeInAngle = angularVelocity * (currentMillisGyro - previousMillisGyro) / 1000;
    changeInAngle = RAD_TO_DEG * changeInAngle;
