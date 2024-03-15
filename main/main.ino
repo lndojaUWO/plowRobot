@@ -24,7 +24,7 @@
 #define PLOW_WIDTH          15                                                 
 
 #define X_MAX               30
-#define Y_MAX               30
+#define Y_MAX               80
 
 #define KP                  5
 #define KI                  0
@@ -44,7 +44,7 @@ const int MAX_PWM = pow(2, PWM_Resolution) - 1;
 const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
 unsigned char leftDriveSpeed = 0;                                                  
 unsigned char rightDriveSpeed = 0;                                                 
-unsigned char targetSpeed;
+float targetSpeed;
 
 const int WHEEL_DIAMETER = 5;
 unsigned int  robotModeIndex = 0;                                              // robot operational state 
@@ -71,7 +71,7 @@ bool measureAngle = false;
 float yAcceleration = 0;
 
 void setup() {
-   //Serial.begin(115200);
+   Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
    
@@ -198,8 +198,28 @@ void straightDriveSpeeds(){
    leftDriveSpeed = targetSpeed + correction;
    rightDriveSpeed = targetSpeed - correction;
 
+   // max drive speed cap
    leftDriveSpeed > MAX_PWM ? leftDriveSpeed = MAX_PWM : leftDriveSpeed = leftDriveSpeed;
    rightDriveSpeed > MAX_PWM ? rightDriveSpeed = MAX_PWM : rightDriveSpeed = rightDriveSpeed;
+   // min drive speed cap
+   leftDriveSpeed < MIN_PWM ? leftDriveSpeed = MIN_PWM : leftDriveSpeed = leftDriveSpeed;
+   rightDriveSpeed < MIN_PWM ? rightDriveSpeed = MIN_PWM : rightDriveSpeed = rightDriveSpeed;
+
+   // display the PID values to Serial
+   Serial.print("Error: ");
+   Serial.print(error*KP);
+   Serial.print(" Integral: ");
+   Serial.print(integral*KI);
+   Serial.print(" Derivative: ");
+   Serial.print(derivative*KD);
+   Serial.print(" Correction: ");
+   Serial.print(correction);
+   Serial.print(" Drive Speeds: ");
+   Serial.print(leftDriveSpeed);
+   Serial.print(" ");
+   Serial.println(rightDriveSpeed);
+   
+        
 
 }
 
@@ -221,7 +241,7 @@ void readMPU(){
 bool turnTo(int setAngle, bool turningRight){
    if(abs(angle) < abs(setAngle)){
       measureAngle = true;
-      turningRight == true ? Bot.Left("D1", targetSpeed, targetSpeed) : Bot.Right("D1", targetSpeed, targetSpeed); // misleading, bot.left turns it to the right
+      turningRight == true ? Bot.Left("D1", targetSpeed, targetSpeed*1.25) : Bot.Right("D1", targetSpeed, targetSpeed); // misleading, bot.left turns it to the right
       return false;
    }
    else{
