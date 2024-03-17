@@ -26,9 +26,9 @@
 #define X_MAX               30
 #define Y_MAX               80
 
-#define KP                  5
+#define KP                  30
 #define KI                  0
-#define KD                  1   
+#define KD                  0   
 int integral = 0;        
 float derivative = 0;
 float lastError = 0;
@@ -71,7 +71,6 @@ bool measureAngle = false;
 float yAcceleration = 0;
 
 void setup() {
-   Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
    
@@ -133,7 +132,8 @@ void loop() {
    }
    else{
       potentiometer = analogRead(POT_R1);
-      targetSpeed = map(potentiometer, 0, 4095, MIN_PWM, MAX_PWM);
+      targetSpeed = map(potentiometer, 0, 4095, 0, 100);
+      
 
 
       /*
@@ -190,37 +190,36 @@ void loop() {
 void straightDriveSpeeds(){
 
    float error = angle;
-   error < 0.01 and error > -0.05 ? integral = 0 : integral += error;
+   (error < 0.25 and error > -0.25) ? integral = 0 : integral += error;
    derivative = error - lastError;
    lastError = error;
 
-   int correction = (KP * error + KI * integral + KD * derivative) * -1;
+   float correction = (KP * error + KI * integral + KD * derivative) * -1;
    leftDriveSpeed = targetSpeed + correction;
    rightDriveSpeed = targetSpeed - correction;
 
-   // max drive speed cap
-   leftDriveSpeed > MAX_PWM ? leftDriveSpeed = MAX_PWM : leftDriveSpeed = leftDriveSpeed;
-   rightDriveSpeed > MAX_PWM ? rightDriveSpeed = MAX_PWM : rightDriveSpeed = rightDriveSpeed;
-   // min drive speed cap
-   leftDriveSpeed < MIN_PWM ? leftDriveSpeed = MIN_PWM : leftDriveSpeed = leftDriveSpeed;
-   rightDriveSpeed < MIN_PWM ? rightDriveSpeed = MIN_PWM : rightDriveSpeed = rightDriveSpeed;
+   if (leftDriveSpeed > 100){
+      rightDriveSpeed = rightDriveSpeed - (leftDriveSpeed - 100);
+      leftDriveSpeed = 100;
+   }
+   if (rightDriveSpeed > 100){
+      leftDriveSpeed = leftDriveSpeed - (rightDriveSpeed - 100);
+      rightDriveSpeed = 100;
+   }
+   if (leftDriveSpeed < 0){
+      rightDriveSpeed = rightDriveSpeed + leftDriveSpeed -25;
+      leftDriveSpeed = 25;
+   }
+   if (rightDriveSpeed < 0){
+      leftDriveSpeed = leftDriveSpeed + rightDriveSpeed -25;
+      rightDriveSpeed = 25;
+   }
+}
 
-   // display the PID values to Serial
-   Serial.print("Error: ");
-   Serial.print(error*KP);
-   Serial.print(" Integral: ");
-   Serial.print(integral*KI);
-   Serial.print(" Derivative: ");
-   Serial.print(derivative*KD);
-   Serial.print(" Correction: ");
-   Serial.print(correction);
-   Serial.print(" Drive Speeds: ");
-   Serial.print(leftDriveSpeed);
-   Serial.print(" ");
-   Serial.println(rightDriveSpeed);
-   
-        
 
+unsigned char toPWM(float speed){
+   unsigned char result = map(speed, 0, 100, MIN_PWM, MAX_PWM);
+   return (result);
 }
 
 void readMPU(){
@@ -241,10 +240,11 @@ void readMPU(){
 bool turnTo(int setAngle, bool turningRight){
    if(abs(angle) < abs(setAngle)){
       measureAngle = true;
-      turningRight == true ? Bot.Left("D1", targetSpeed, targetSpeed*1.25) : Bot.Right("D1", targetSpeed, targetSpeed); // misleading, bot.left turns it to the right
+      turningRight == true ? Bot.Left("D1", toPWM(targetSpeed), toPWM(targetSpeed)) : Bot.Right("D1", toPWM(targetSpeed), toPWM(targetSpeed)); // misleading, bot.left turns it to the right
       return false;
    }
    else{
+      angle = 0;
       measureAngle = false;
       Bot.Stop("D1");
       LeftEncoder.clearEncoder();
@@ -265,7 +265,7 @@ bool driveTo(int distance, long motorPosition){
 
    if(motorPosition < getCM(distance)){ 
       measureAngle = true;
-      Bot.Forward("D1", leftDriveSpeed, rightDriveSpeed);  
+      Bot.Forward("D1", toPWM(leftDriveSpeed), toPWM(rightDriveSpeed));  
       return false;
    }
    else{
