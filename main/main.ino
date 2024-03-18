@@ -6,14 +6,13 @@
 #include <Adafruit_TCS34725.h>
 #include <Wire.h>
 #include <ESP32Servo.h>
+#include <ScoopDrive.h>
 
 
-#define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
-#define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
-#define RIGHT_MOTOR_A       37                                                 // GPIO37 pin 30 (J37) Motor 2 A
-#define RIGHT_MOTOR_B       38                                                 // GPIO38 pin 31 (J38) Motor 2 B
-#define ENCODER_LEFT_A      15                                                 // left encoder A signal is connected to pin 8 GPIO15 (J15)
-#define ENCODER_LEFT_B      16                                                 // left encoder B signal is connected to pin 8 GPIO16 (J16)
+#define MOTOR_A             35                                                 // GPIO35 pin 28 (J35) Motor 1 A
+#define MOTOR_B             36                                                 // GPIO36 pin 29 (J36) Motor 1 B                                                // GPIO38 pin 31 (J38) Motor 2 B
+#define ENCODER_A      15                                                 // left encoder A signal is connected to pin 8 GPIO15 (J15)
+#define ENCODER_B      16                                                 // left encoder B signal is connected to pin 8 GPIO16 (J16)
 #define MODE_BUTTON         0                                                  // GPIO0  pin 27 for Push Button 1
 #define MOTOR_ENABLE_SWITCH 3                                                  // DIP Switch S1-1 pulls Digital pin D3 to ground when on, connected to pin 15 GPIO3 (J3)
 #define POT_R1              1                                                  // when DIP Switch S1-3 is on, Analog AD0 (pin 39) GPIO1 is connected to Poteniometer R1
@@ -22,6 +21,8 @@
 // set to false if using a common cathode LED
 #define commonAnode true
 #define SWITCH_PIN          46
+
+void ARDUINO_ISR_ATTR encoderISR(void* arg);
 
 unsigned int robotModeIndex = 0;                                              // robot operational state 
 unsigned int debounceTimer;         
@@ -36,7 +37,18 @@ const int PWM_Resolution = 8;                                                  /
 const int MIN_PWM = 150;                                                       
 const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
 const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
-                                           
+const int frequency = 20000;
+
+// Encoder structure
+struct Encoder {
+  const int channalA;                                 // GPIO pin for encoder channel A
+  const int channalB;                                 // GPIO pin for encoder channel B
+  long position;                                        // current encoder position
+};
+
+Encoder encoder = {ENCODER_A, ENCODER_B, 0}; // Create an encoder object
+
+
 byte gammatable[256];
 float red, green, blue; // for color sensor
 
@@ -45,8 +57,7 @@ const int servoPin          = 41;                 // GPIO pin for servo motor
 Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  
 
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
-Motion Bot = Motion();                                                         
-Encoders LeftEncoder = Encoders();  
+ScoopDrive scoopMotor = ScoopDrive(MOTOR_A,MOTOR_B);
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
@@ -65,24 +76,31 @@ void setup() {
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
 
-   pinMode(SWITCH_PIN, INPUT_PULLUP);
+   //pinMode(SWITCH_PIN, INPUT_PULLUP);
 
-   sorterServo.attach(servoPin);
+   // sorterServo.attach(servoPin);
+   // sorterServo.write(45);
 
-   Wire.begin(47,48);
+   // Wire.begin(47,48);
 
-   if (tcs.begin()) {
-   //Serial.println("Found sensor");
-   } else {
-    Serial.println("No TCS34725 found ... check your connections");
-    while (1); // halt!
-   }
+   // if (tcs.begin()) {
+   // //Serial.println("Found sensor");
+   // } else {
+   //  Serial.println("No TCS34725 found ... check your connections");
+   //  while (1); // halt!
+   // }
    
   // Set up motors and encoders
-   Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); 
-   LeftEncoder.Begin(ENCODER_LEFT_A, ENCODER_LEFT_B, &Bot.iLeftMotorRunning ); 
+   scoopMotor.begin();
+  pinMode(encoder.channalA, INPUT);                   // configure GPIO for encoder channel A input
+  pinMode(encoder.channalB, INPUT);                   // configure GPIO for encoder channel B input
+  // configure encoder to trigger interrupt with each rising edge on channel A
+  attachInterruptArg(encoder.channalA, encoderISR, &encoder, RISING);
+
+
    pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);
    pinMode(MODE_BUTTON, INPUT_PULLUP);
+
 
 
    debounceTimer = 0;
@@ -107,58 +125,53 @@ void setup() {
 }
 
 void loop() {
-   long motorPosition[] = {0, 0}; // represented in encouder counts
+   long motorPosition = 0; // represented in encouder counts
    int potentiometer = 0; // raw ADC value from potentiometer
 
-   digitalRead(SWITCH_PIN) == HIGH ? roboMode = true : roboMode = false;
+   // digitalRead(SWITCH_PIN) == HIGH ? roboMode = true : roboMode = false;
 
 
 
-   noInterrupts();                                                             
-   LeftEncoder.getEncoderRawCount();
-   motorPosition[0] = LeftEncoder.lRawEncoderCount;                                                 
+   noInterrupts();  
+   motorPosition = encoder.position;                                                 
    interrupts();                                                               
 
    buttonDebounce();
-
    if (robotModeIndex == 0){
    
-      Bot.Stop("D1");
-      LeftEncoder.clearEncoder(); 
-      Serial.println("Robot Stopped");                                       
-      // set leds to red
+      scoopMotor.stop();
+      // Serial.println("Robot Stopped");                                       
+      // set leds to white
       setLedColor(100, 100, 100);
       robotModeIndex = 0;
    }
    else{
-      // set led to purple
-      setLedColor(100, 0, 100);
+      // if (roboMode == true){         
+         potentiometer = analogRead(POT_R1); // read potentiometer value
+         targetPos = map(potentiometer, 0, 4095, 0, PULSES_PER_REVOLUTION*1.25); // map potentiometer value to motor position
+         scoopMotor.driveTo(targetPos,motorPosition,toPWM(100));
+         // Print the motor position and target position to serial
+         Serial.print("Motor Position: ");
+         Serial.print(motorPosition);
+         Serial.print(" Target Position: ");
+         Serial.println(targetPos);
 
-      if (roboMode == true){
-         // potentiometer = analogRead(POT_R1); // read potentiometer value
-         // targetPos = map(potentiometer, 0, 4095, 0, 100); // map potentiometer value to motor position
-         // if (targetPos > 100){
-         //    Bot.Forward("D1", toPWM(100), toPWM(100));
-         // }
-         // else{
-         //    Bot.Stop("D1");
-         // }
-         Bot.Forward("D1", toPWM(100), toPWM(100));
+         // set led to purple
+         setLedColor(100, 0, 100);
+      // }
+      // else{
+      //    if (readColor()){
+      //       // set leds to color
+      //       result = maxColor();
+      //       if (result == 'g'){
+      //          turnServo(0);
 
-      }
-      else{
-         if (readColor()){
-            // set leds to color
-            result = maxColor();
-            if (result == 'g'){
-               turnServo(0);
-
-            }
-            else{
-               turnServo(1);
-            }
-         }        
-      }      
+      //       }
+      //       else{
+      //          turnServo(1);
+      //       }
+      //    }        
+      // }      
    }  
       
 }
@@ -186,15 +199,6 @@ bool readColor(){
 
 }
 
-
-void driveTo(long distance, long motorPosition){
-   if(motorPosition < distance){ 
-      Bot.Forward("D1", toPWM(100), 0);  
-   }
-   if (motorPosition > distance){
-      Bot.Reverse("D1", toPWM(100), 0);
-   }
-}
 
 unsigned char toPWM(float speed){
    unsigned char result = map(speed, 0, 100, MIN_PWM, MAX_PWM);
@@ -270,6 +274,21 @@ void setLedColor(int r, int g, int b){
    }
 }
 
+// encoder interrupt service routine
+// argument is pointer to an encoder structure, which is statically cast to a Encoder structure, allowing multiple
+// instances of the encoderISR to be created (1 per encoder)
+void ARDUINO_ISR_ATTR encoderISR(void* arg) {
+  Encoder* s = static_cast<Encoder*>(arg);         // cast pointer to static structure
+  
+  int b = digitalRead(s->channalB);                   // read state of channel B
+  if (b > 0) {                                     // high, leading channel A
+    s->position--;                                      // decrease position
+  }
+  else {                                           // low, lagging channel A
+    s->position++;                                      // increase position
+  }
+}
+
 // placed into the depths so we dont have to look at it
 // reads the button and toggles the robot mode
 void buttonDebounce(){
@@ -299,4 +318,5 @@ void buttonDebounce(){
       }
    }
 }
+
 
