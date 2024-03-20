@@ -21,26 +21,27 @@ void ScoopDrive::begin() {
     ledcSetup(ledcChannel+1,pwmFrequency,8);
 }
 
-void ScoopDrive::driveTo(long distance, long motorPosition, unsigned char pwmValue) {
-    if (distance > motorPosition){
-        iMotorRunning = 5;
+bool ScoopDrive::driveTo(long distance, long motorPosition, long threshold, unsigned char pwmValue) {
+    long difference = distance - motorPosition;
+
+    if (difference > 0 and difference > threshold) {
         ledcWrite(ledcChannel,pwmValue);
         ledcWrite(ledcChannel+1, 0);
+        return false;
     }
-    else if(distance < motorPosition){
-        iMotorRunning = 10;
+    else if(difference < 0 and difference < -threshold) {
         ledcWrite(ledcChannel,0);
         ledcWrite(ledcChannel+1,pwmValue);
+        return false;
     }
     else{
-        iMotorRunning = 100;
         ledcWrite(ledcChannel,0);
         ledcWrite(ledcChannel+1,0);
+        return true;
     }
 }
 
 void ScoopDrive::stop() {
-    iMotorRunning = 100;
     digitalWrite(ledcChannel, 0);
     digitalWrite(ledcChannel+1, 0);
 }

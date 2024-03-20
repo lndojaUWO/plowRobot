@@ -8,10 +8,8 @@ public:
     ScoopDrive(int pinA, int pinB);
     ~ScoopDrive();
 
-    int iMotorRunning; // workaround to be able to use MSE library for encoders
-
     void begin();
-    void driveTo(long distance, long motorPosition, unsigned char pwmValue);
+    bool driveTo(long distance, long motorPosition, long threshold, unsigned char pwmValue);
     void stop();
 
 private:
