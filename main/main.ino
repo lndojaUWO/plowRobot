@@ -27,8 +27,8 @@
 #define Y_MAX               80
 
 #define KP                  2
-#define KI                  0.325
-#define KD                  0.001
+#define KI                  0.125
+#define KD                  0
 int integral = 0;        
 float derivative = 0;
 float lastError = 0;
@@ -151,6 +151,7 @@ void loop() {
             // set leds to red
             setLedColor(255, 0, 0);
             stageComplete = true;
+            integral = 0;
             break;
          case DRIVE_TO_END:
             // set leds to green
@@ -165,6 +166,7 @@ void loop() {
             if (turnTo(90, false)){
                   stageComplete = true;
             }
+            integral = 0;
             break;
          case NEXT_COLUMN:
             // set leds to yellow
@@ -179,6 +181,7 @@ void loop() {
             if (turnTo(-90, true)){
                   stageComplete = true;
             }
+            integral = 0;
             break;
       }
       if (stageComplete){
@@ -215,8 +218,6 @@ void straightDriveSpeeds(long leftPosition, long rightPosition){
       leftDriveSpeed = leftDriveSpeed - (rightDriveSpeed - 100);
       rightDriveSpeed = 100;
    }
-   Serial.println(error);
-
 }
 
 
@@ -267,12 +268,10 @@ bool driveTo(int distance, long motorPositionLeft, long motorPositionRight){
    straightDriveSpeeds(motorPositionLeft, motorPositionRight);
 
    if(motorPositionLeft < getCM(distance)){ 
-      measureAngle = true;
       Bot.Forward("D1", toPWM(rightDriveSpeed), toPWM(leftDriveSpeed));  
       return false;
    }
    else{
-      measureAngle = false;
       Bot.Stop("D1");
       LeftEncoder.clearEncoder();
       RightEncoder.clearEncoder();
