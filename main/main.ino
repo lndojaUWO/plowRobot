@@ -26,9 +26,9 @@
 #define X_MAX               30
 #define Y_MAX               80
 
-#define KP                  30
-#define KI                  0
-#define KD                  0   
+#define KP                  2
+#define KI                  0.325
+#define KD                  0.001
 int integral = 0;        
 float derivative = 0;
 float lastError = 0;
@@ -42,8 +42,8 @@ const int PWM_Resolution = 8;                                                  /
 const int MIN_PWM = 150;                                                       
 const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
 const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
-unsigned char leftDriveSpeed = 0;                                                  
-unsigned char rightDriveSpeed = 0;                                                 
+float leftDriveSpeed = 0;                                                  
+float rightDriveSpeed = 0;                                                 
 float targetSpeed;
 
 const int WHEEL_DIAMETER = 5;
@@ -110,7 +110,7 @@ void loop() {
    LeftEncoder.getEncoderRawCount();
    RightEncoder.getEncoderRawCount();
    motorPosition[0] = LeftEncoder.lRawEncoderCount;                                                 
-   motorPosition[1] = RightEncoder.lRawEncoderCount;
+   motorPosition[1] = (RightEncoder.lRawEncoderCount) * -1.0;
    interrupts();                                                               
 
    buttonDebounce();
@@ -155,7 +155,7 @@ void loop() {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            if (driveTo(Y_MAX, motorPosition[0])){
+            if (driveTo(Y_MAX, motorPosition[0],motorPosition[1])){
                   stageComplete = true;                  
             }
             break;
@@ -169,7 +169,7 @@ void loop() {
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            if (driveTo(PLOW_WIDTH, motorPosition[0])){
+            if (driveTo(PLOW_WIDTH, motorPosition[0],motorPosition[1])){
                   stageComplete = true;
             }
             break;
@@ -187,17 +187,26 @@ void loop() {
    }
 }
 
-void straightDriveSpeeds(){
+void straightDriveSpeeds(long leftPosition, long rightPosition){
 
-   float error = angle;
+   float error = rightPosition - leftPosition;
    (error < 0.25 and error > -0.25) ? integral = 0 : integral += error;
    derivative = error - lastError;
    lastError = error;
 
-   float correction = (KP * error + KI * integral + KD * derivative) * -1;
+   float correction = (KP * error + KI * integral + KD * derivative);
    leftDriveSpeed = targetSpeed + correction;
    rightDriveSpeed = targetSpeed - correction;
 
+
+   if (leftDriveSpeed < 0){
+      rightDriveSpeed = rightDriveSpeed - leftDriveSpeed -25;
+      leftDriveSpeed = 25;
+   }
+   if (rightDriveSpeed < 0){
+      leftDriveSpeed = leftDriveSpeed - rightDriveSpeed -25;
+      rightDriveSpeed = 25;
+   }
    if (leftDriveSpeed > 100){
       rightDriveSpeed = rightDriveSpeed - (leftDriveSpeed - 100);
       leftDriveSpeed = 100;
@@ -206,14 +215,8 @@ void straightDriveSpeeds(){
       leftDriveSpeed = leftDriveSpeed - (rightDriveSpeed - 100);
       rightDriveSpeed = 100;
    }
-   if (leftDriveSpeed < 0){
-      rightDriveSpeed = rightDriveSpeed + leftDriveSpeed -25;
-      leftDriveSpeed = 25;
-   }
-   if (rightDriveSpeed < 0){
-      leftDriveSpeed = leftDriveSpeed + rightDriveSpeed -25;
-      rightDriveSpeed = 25;
-   }
+   Serial.println(error);
+
 }
 
 
@@ -259,13 +262,13 @@ long getCM(long inCM){
 }
 
 // input a distance in cm and it will drive forward that amount
-bool driveTo(int distance, long motorPosition){
+bool driveTo(int distance, long motorPositionLeft, long motorPositionRight){
 
-   straightDriveSpeeds();
+   straightDriveSpeeds(motorPositionLeft, motorPositionRight);
 
-   if(motorPosition < getCM(distance)){ 
+   if(motorPositionLeft < getCM(distance)){ 
       measureAngle = true;
-      Bot.Forward("D1", toPWM(leftDriveSpeed), toPWM(rightDriveSpeed));  
+      Bot.Forward("D1", toPWM(rightDriveSpeed), toPWM(leftDriveSpeed));  
       return false;
    }
    else{
