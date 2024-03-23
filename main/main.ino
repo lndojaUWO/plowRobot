@@ -26,8 +26,8 @@
 #define X_MAX               30
 #define Y_MAX               80
 
-#define KP                  2
-#define KI                  0.125
+#define KP                  1.5
+#define KI                  0
 #define KD                  0
 int integral = 0;        
 float derivative = 0;
@@ -69,6 +69,7 @@ Adafruit_MPU6050 mpu;                                                          /
 float angle = 0;
 bool measureAngle = false;
 float yAcceleration = 0;
+int setAngle = 0;
 
 void setup() {
    smartLED.begin();                                                           
@@ -156,6 +157,7 @@ void loop() {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
+            measureAngle = false;
             if (driveTo(Y_MAX, motorPosition[0],motorPosition[1])){
                   stageComplete = true;                  
             }
@@ -163,6 +165,8 @@ void loop() {
          case TURN_LEFT:
             // set leds to blue
             setLedColor(0, 0, 255);
+            measureAngle = true;
+            driveLoopIndex == 4 ? setAngle = 180 : setAngle = 90;
             if (turnTo(90, false)){
                   stageComplete = true;
             }
@@ -178,6 +182,8 @@ void loop() {
          case TURN_RIGHT:
             // set leds to blue
             setLedColor(0, 0, 255);
+            measureAngle = true;
+            driveLoopIndex == 8 ? setAngle = -180 : setAngle = -90;
             if (turnTo(-90, true)){
                   stageComplete = true;
             }
@@ -218,6 +224,14 @@ void straightDriveSpeeds(long leftPosition, long rightPosition){
       leftDriveSpeed = leftDriveSpeed - (rightDriveSpeed - 100);
       rightDriveSpeed = 100;
    }
+   // print left and right drive speeds, aswell as the error
+   Serial.print("Left: ");
+   Serial.print(leftDriveSpeed);
+   Serial.print(" Right: ");
+   Serial.print(rightDriveSpeed);
+   Serial.print(" Error: ");
+   Serial.println(error);
+   
 }
 
 
@@ -249,7 +263,6 @@ bool turnTo(int setAngle, bool turningRight){
    }
    else{
       angle = 0;
-      measureAngle = false;
       Bot.Stop("D1");
       LeftEncoder.clearEncoder();
       RightEncoder.clearEncoder();
