@@ -4,6 +4,7 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
+#include <driveBot.h>
 
 #define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
 #define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
@@ -20,19 +21,15 @@
 #define SMART_LED_COUNT     1                                                  // number of SMART LEDs in use
 
 // all distances are written in cm
-#define TURN90DISTANCE      12                                                 
-#define PLOW_WIDTH          15                                                 
+#define PLOW_WIDTH          15.0                                                 
 
-#define X_MAX               30
-#define Y_MAX               80
+#define X_MAX               80.0
+#define Y_MAX               100.0
 
-#define KP                  1.5
-#define KI                  0
-#define KD                  0
-int integral = 0;        
-float derivative = 0;
-float lastError = 0;
+#define KP                  40.0                  
 
+#define WHEEL_DIAMETER  5.0
+#define PULSES_PER_REVOLUTION 1096                                        // encoder pulses per motor revolution
 
 unsigned int debounceTimer;                                                   
 unsigned long previousMillisGyro;                                                  
@@ -41,18 +38,19 @@ unsigned long currentMillisGyro;
 const int PWM_Resolution = 8;                                                  // bit resolution
 const int MIN_PWM = 150;                                                       
 const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
-const int PULSES_PER_REVOLUTION = 1096;                                        // encoder pulses per motor revolution
 float leftDriveSpeed = 0;                                                  
 float rightDriveSpeed = 0;                                                 
 float targetSpeed;
+bool isTurning = false;
+bool topBottomToggle = false;
 
-const int WHEEL_DIAMETER = 5;
+
 unsigned int  robotModeIndex = 0;                                              // robot operational state 
-enum DriveStage { STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN,TURN_RIGHT };     // enums that are used so i can use text names in the switch case instead of integers
+enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN};     // enums that are used so i can use text names in the switch case instead of integers
 /*
 This array represents the actions the robot will take in one loop. 
 */
-DriveStage driveLoops[9] = {STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN, TURN_LEFT, DRIVE_TO_END, TURN_RIGHT, NEXT_COLUMN, TURN_RIGHT};
+DriveStage driveLoops[2] = {DRIVE_TO_END, NEXT_COLUMN};
 int driveLoopIndex = 0; // which stage in the driveLoop we are at
 bool stageComplete;     // if True, start the next stage in the loop
 int numLoops = 0;     
@@ -60,18 +58,23 @@ int numLoops = 0;
 Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  
 
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
-Motion Bot = Motion();                                                         
+Motion Bot = Motion();
+DriveBot driveBot = DriveBot();                                                         
 Encoders LeftEncoder = Encoders();                                             
 Encoders RightEncoder = Encoders();         
 
 // MPU6050 IMU Sensor
 Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
-float angle = 0;
+float angle = PI/2.0;
 bool measureAngle = false;
 float yAcceleration = 0;
 int setAngle = 0;
 
+
+
+
 void setup() {
+   Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
    
@@ -96,8 +99,7 @@ void setup() {
 
 
    debounceTimer = 0;
-   //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
-   numLoops = 1;
+   numLoops = numberOfLoops();
    stageComplete = false;
 
    previousMillisGyro = millis();
@@ -112,126 +114,109 @@ void loop() {
    RightEncoder.getEncoderRawCount();
    motorPosition[0] = LeftEncoder.lRawEncoderCount;                                                 
    motorPosition[1] = (RightEncoder.lRawEncoderCount) * -1.0;
-   interrupts();                                                               
+   interrupts();  
+
+
+   readMPU();
+                                                             
 
    buttonDebounce();
-   readMPU();
-
-  
-
 
    if (robotModeIndex == 0 or driveLoopIndex == 9){
          Bot.Stop("D1");
          LeftEncoder.clearEncoder();                                        
          RightEncoder.clearEncoder();
+         driveBot.setPosition(0,0);
+         driveBot.setLastEncoderValue(0,0);
          // set leds to red
          setLedColor(255, 0, 0);
-         //numLoops = numberOfLoops(X_MAX, PLOW_WIDTH);
-         numLoops = 1;
+         numLoops = numberOfLoops();
          driveLoopIndex = 0;
          robotModeIndex = 0;
+         measureAngle = false;
+         angle = PI/2.0;
    }
    else{
       potentiometer = analogRead(POT_R1);
       targetSpeed = map(potentiometer, 0, 4095, 0, 100);
       
-
-
-      /*
-      This switch case determines what the robot will do in each stage
-      for reference one loop is: 
-
-      STOP, DRIVE_TO_END, TURN_LEFT, NEXT_COLUMN, TURN_LEFT, DRIVE_TO_END, TURN_RIGHT, NEXT_COLUMN, TURN_RIGHT
       
-      */
+
       switch(driveLoops[driveLoopIndex]) {
-         case STOP:
-            Bot.Stop("D1");
-            LeftEncoder.clearEncoder();                                        
-            RightEncoder.clearEncoder();
-            // set leds to red
-            setLedColor(255, 0, 0);
-            stageComplete = true;
-            integral = 0;
-            break;
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            measureAngle = false;
-            if (driveTo(Y_MAX, motorPosition[0],motorPosition[1])){
-                  stageComplete = true;                  
-            }
-            break;
-         case TURN_LEFT:
-            // set leds to blue
-            setLedColor(0, 0, 255);
             measureAngle = true;
-            driveLoopIndex == 4 ? setAngle = 180 : setAngle = 90;
-            if (turnTo(90, false)){
-                  stageComplete = true;
+            long desiredY;
+            topBottomToggle == false ? desiredY = getCM(Y_MAX) : desiredY = getCM(0);
+            driveBot.setDesiredY(desiredY);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle, isTurning);
+            drive(driveBot.getNewAngle(), targetSpeed);
+            if (driveBot.getDistance() < getCM(0.5)){
+               Bot.Stop("D1");
+               stageComplete = true;
             }
-            integral = 0;
             break;
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            if (driveTo(PLOW_WIDTH, motorPosition[0],motorPosition[1])){
-                  stageComplete = true;
-            }
-            break;
-         case TURN_RIGHT:
-            // set leds to blue
-            setLedColor(0, 0, 255);
             measureAngle = true;
-            driveLoopIndex == 8 ? setAngle = -180 : setAngle = -90;
-            if (turnTo(-90, true)){
-                  stageComplete = true;
+            driveBot.setDesiredX(getCM(PLOW_WIDTH * (numberOfLoops() - numLoops + 1)));
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle, isTurning);
+            drive(driveBot.getNewAngle(), targetSpeed);
+            if (driveBot.getDistance() < getCM(1)){
+               measureAngle = false;
+               Bot.Stop("D1");
+               stageComplete = true;
             }
-            integral = 0;
             break;
       }
       if (stageComplete){
          driveLoopIndex = nextStage(); // finds out what stage the robot must do next
       }
+      
    }
+
 }
 
-void straightDriveSpeeds(long leftPosition, long rightPosition){
+void drive(double desiredAngle, double setSpeed){
+   
+   float error = desiredAngle - angle;
+   if (error > PI) {
+   error -= 2.0 * PI;
+   } else if (error < -PI) {
+   error += 2.0 * PI;
+   }    
 
-   float error = rightPosition - leftPosition;
-   (error < 0.25 and error > -0.25) ? integral = 0 : integral += error;
-   derivative = error - lastError;
-   lastError = error;
+   float correction;
+   if (abs(error) > PI/16.0){
+      setSpeed = 0;
+      correction = KP*error*2.0;
+      isTurning = true;
+   }
+   else{
+      isTurning = false;
+      correction = KP*error;
+   }
 
-   float correction = (KP * error + KI * integral + KD * derivative);
-   leftDriveSpeed = targetSpeed + correction;
-   rightDriveSpeed = targetSpeed - correction;
-
+   leftDriveSpeed = setSpeed - correction;
+   rightDriveSpeed = setSpeed + correction;
+   leftDriveSpeed > 100 ? leftDriveSpeed = 100 : leftDriveSpeed = leftDriveSpeed;
+   rightDriveSpeed > 100 ? rightDriveSpeed = 100 : rightDriveSpeed = rightDriveSpeed;
+   leftDriveSpeed < -100 ? leftDriveSpeed = -100 : leftDriveSpeed = leftDriveSpeed;
+   rightDriveSpeed < -100 ? rightDriveSpeed = -100 : rightDriveSpeed = rightDriveSpeed;
 
    if (leftDriveSpeed < 0){
-      rightDriveSpeed = rightDriveSpeed - leftDriveSpeed -25;
-      leftDriveSpeed = 25;
+      Bot.Right("D1", toPWM(rightDriveSpeed),toPWM(abs(leftDriveSpeed)));
    }
-   if (rightDriveSpeed < 0){
-      leftDriveSpeed = leftDriveSpeed - rightDriveSpeed -25;
-      rightDriveSpeed = 25;
+   else if (rightDriveSpeed < 0){
+      Bot.Left("D1", toPWM(abs(rightDriveSpeed)), toPWM(leftDriveSpeed));
    }
-   if (leftDriveSpeed > 100){
-      rightDriveSpeed = rightDriveSpeed - (leftDriveSpeed - 100);
-      leftDriveSpeed = 100;
+   else{
+      Bot.Forward("D1", toPWM(rightDriveSpeed), toPWM(leftDriveSpeed));
    }
-   if (rightDriveSpeed > 100){
-      leftDriveSpeed = leftDriveSpeed - (rightDriveSpeed - 100);
-      rightDriveSpeed = 100;
-   }
-   // print left and right drive speeds, aswell as the error
-   Serial.print("Left: ");
-   Serial.print(leftDriveSpeed);
-   Serial.print(" Right: ");
-   Serial.print(rightDriveSpeed);
-   Serial.print(" Error: ");
-   Serial.println(error);
    
+
 }
 
 
@@ -250,46 +235,20 @@ void readMPU(){
    angularVelocity += 0.0048; // offset
    currentMillisGyro = millis();
    float changeInAngle = angularVelocity * (currentMillisGyro - previousMillisGyro) / 1000;
-   changeInAngle = RAD_TO_DEG * changeInAngle;
-   measureAngle == true ? angle += changeInAngle : angle = 0;
+   changeInAngle = changeInAngle;
+   measureAngle == true ? angle += changeInAngle : angle = angle;
+   angle = constrainAngle(angle);
    previousMillisGyro = currentMillisGyro;
 }
 
-bool turnTo(int setAngle, bool turningRight){
-   if(abs(angle) < abs(setAngle)){
-      measureAngle = true;
-      turningRight == true ? Bot.Left("D1", toPWM(targetSpeed), toPWM(targetSpeed)) : Bot.Right("D1", toPWM(targetSpeed), toPWM(targetSpeed)); // misleading, bot.left turns it to the right
-      return false;
-   }
-   else{
-      angle = 0;
-      Bot.Stop("D1");
-      LeftEncoder.clearEncoder();
-      RightEncoder.clearEncoder();
-      return true;
-   }
-}
-
 // returns the number of encoder counts needed to drive a certain distance
-long getCM(long inCM){ 
-   return(inCM * PULSES_PER_REVOLUTION / (WHEEL_DIAMETER * 3.14159));
+long getCM(double inCM){ 
+   return((inCM * PULSES_PER_REVOLUTION) / (WHEEL_DIAMETER * PI));
 }
 
-// input a distance in cm and it will drive forward that amount
-bool driveTo(int distance, long motorPositionLeft, long motorPositionRight){
-
-   straightDriveSpeeds(motorPositionLeft, motorPositionRight);
-
-   if(motorPositionLeft < getCM(distance)){ 
-      Bot.Forward("D1", toPWM(rightDriveSpeed), toPWM(leftDriveSpeed));  
-      return false;
-   }
-   else{
-      Bot.Stop("D1");
-      LeftEncoder.clearEncoder();
-      RightEncoder.clearEncoder();
-      return true;
-   }
+double toCm(long encoderCount){
+   double result = (encoderCount * WHEEL_DIAMETER * PI) / (PULSES_PER_REVOLUTION);
+   return (result);
 }
 
 void setLedColor(int r, int g, int b){
@@ -299,16 +258,18 @@ void setLedColor(int r, int g, int b){
    }
 }
 
-int numberOfLoops(int xMax, int plowWidth){
-   return xMax / plowWidth;
+int numberOfLoops(){
+   return (X_MAX / PLOW_WIDTH - 1);
 }
 
 int nextStage(){
    if(stageComplete){
       stageComplete = false;
       driveLoopIndex++;
-      if (driveLoopIndex == 9){ // if we have finished the loop
+      driveLoopIndex == 2 ? topBottomToggle = not topBottomToggle : topBottomToggle = topBottomToggle;
+      if (driveLoopIndex == 2){ // if we have finished the loop
          if (numLoops == 0){
+            driveLoopIndex = 0;
             return 9; // if we have done all the loops we return 9 to indicate that we are done
          }
          else{
@@ -320,6 +281,12 @@ int nextStage(){
    return driveLoopIndex;
 }
 
+double constrainAngle(double x){
+    x = fmod(x,2.0*PI);
+    if (x < 0)
+        x += 2.0*PI;
+    return x;
+}
 // placed into the depths so we dont have to look at it
 // reads the button and toggles the robot mode
 void buttonDebounce(){
