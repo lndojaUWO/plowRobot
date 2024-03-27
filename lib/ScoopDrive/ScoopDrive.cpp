@@ -4,7 +4,7 @@ ScoopDrive::ScoopDrive(int pinA, int pinB) {
     // Initialize member variables here if necessary
     motorPinA = pinA;
     motorPinB = pinB;
-    ledcChannel = 0;
+    ledcChannel = 4;
     pwmFrequency = 20000;
 }
 

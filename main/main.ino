@@ -18,8 +18,8 @@
 #define SMART_LED           21  // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
 #define SMART_LED_COUNT      1  // number of SMART LEDs in use
 #define commonAnode       true  // set to false if using a common cathode LED
-#define SERVO_PIN           41
-#define SERVO_PAUSE_TIME  3000  // time in milliseconds that the servo will pause in between movements
+#define SERVO_PIN           42
+#define SERVO_PAUSE_TIME  1000  // time in milliseconds that the servo will pause in between movements
 
 void ARDUINO_ISR_ATTR encoderISR(void* arg);
 
@@ -58,25 +58,27 @@ float red, green, blue; // for color sensor
 int servoPos = 0;
 char result = 'w';
 bool servoToggle = false;
+bool scoopVibrateToggle = false;
 
 enum stage {ROTATE_SCOOP, START_SORTER, STOP}; 
 stage sorterStage = ROTATE_SCOOP;
 
 
+
 void setup() {
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
-
-   // servo setup
-   sorterServo.attach(SERVO_PIN);
-   sorterServo.write(45);
+   ESP32PWM::allocateTimer(0);
+	ESP32PWM::allocateTimer(1);
+	ESP32PWM::allocateTimer(2);
+	ESP32PWM::allocateTimer(3);
 
    // color sensor setup
    Wire.begin(47,48);
    if (tcs.begin()) {
       //Serial.println("Found sensor");
    } else {
-      Serial.println("No TCS34725 found ... check your connections");
+      // Serial.println("No TCS34725 found ... check your connections");
       while (1); // halt!
    }
    
@@ -106,6 +108,11 @@ void setup() {
       }
       //Serial.println(gammatable[i]);
    }
+   // servo setup
+   sorterServo.attach(SERVO_PIN);
+   sorterServo.setTimerWidth(14);
+   sorterServo.setPeriodHertz(50);
+   // sorterServo.write(30);
 
    previousMillisColour = millis();
    previousMillisServo = millis();
@@ -119,7 +126,7 @@ void loop() {
    motorPosition = encoder.position; // getting the current encoder position, placed in here so that interupts wont mess with the value                                                 
    interrupts();                                                               
    buttonDebounce();
-
+   // Serial.println(sorterStage);
    // Default Rest Mode
    if (robotModeIndex == 0){
       scoopMotor.stop();
@@ -127,17 +134,19 @@ void loop() {
       setLedColor(100, 100, 100);
       robotModeIndex = 0;
       previousMillisStage = millis();
-      sorterStage = STOP;
+      sorterStage = ROTATE_SCOOP;
    }
 
    // Operational Mode
    else{
+      // Serial.println("operational mode");
       switch (sorterStage){
          case ROTATE_SCOOP:
             setLedColor(100, 0, 100); // set led to purple
             if (millis() - previousMillisStage > 1000){ // 1 Second delay before scoop starts to turn
-               if (scoopMotor.driveTo(100, motorPosition, PULSES_PER_REVOLUTION/16, 100)){
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.25, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
                   previousMillisStage = millis();
+                  previousMillisServo = millis();
                   sorterStage = START_SORTER;
                }   
             }
@@ -146,6 +155,12 @@ void loop() {
          case START_SORTER:
             if (readColor()){
                result = maxColor();
+               int vibOffset;
+               scoopVibrateToggle == false ? vibOffset = 0.125 : vibOffset = -0.125;
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(2.25+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
+                  scoopVibrateToggle == false ? scoopVibrateToggle = true : scoopVibrateToggle = false;
+               }
+
                if (result == 'g'){
                   turnServo(0);
                }
@@ -153,14 +168,15 @@ void loop() {
                   turnServo(1);
                }
             }  
-            if (millis() - previousMillisStage > 5000){ // Sorts for 5 seconds
+            if (millis() - previousMillisStage > 10000){ // Sorts for 5 seconds
                sorterStage = STOP;
             }
             break;
 
          case STOP:
+            // Serial.println("STOP");
             setLedColor(100, 0, 100); // set led to purple
-            if (scoopMotor.driveTo(0, motorPosition, PULSES_PER_REVOLUTION/16, 100)){ // Drive Scoop back to start
+            if (scoopMotor.driveTo(0, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){ // Drive Scoop back to start
                robotModeIndex = 0;
             }
             break;
@@ -169,12 +185,11 @@ void loop() {
 } // end of main loop
 
 bool readColor(){
-   currentMillisColour = millis();
-   if (currentMillisColour - previousMillisColour > 60) {
+   if (millis() - previousMillisColour > 60) {
       tcs.setInterrupt(false);  // turn on LED
       tcs.getRGB(&red, &green, &blue);
       tcs.setInterrupt(true);  // turn off LED
-      previousMillisColour = currentMillisColour;
+      previousMillisColour = millis();
 
       // Serial.print("R:\t"); Serial.print(int(red)); 
       // Serial.print("\tG:\t"); Serial.print(int(green)); 
@@ -199,6 +214,7 @@ void turnServo(int choice){
    switch (choice){
       case 0:
          if (currentMillisServo - previousMillisServo > SERVO_PAUSE_TIME){
+            // Serial.println("Turning Servo");
             sorterServo.write(0);
             servoToggle = true;
          }
@@ -208,6 +224,7 @@ void turnServo(int choice){
          break;
       case 1:
          if (currentMillisServo - previousMillisServo > SERVO_PAUSE_TIME){
+            // Serial.println("Turning Servo");
             sorterServo.write(90);
             servoToggle = true;
          }
@@ -266,6 +283,10 @@ void ARDUINO_ISR_ATTR encoderISR(void* arg) {
    else {                                           // low, lagging channel A
       s->position++;                                      // increase position
    }
+}
+
+int mapToServo(int value){
+   return map(value, 0, 180, 0, 16384);
 }
 
 // placed into the depths so we dont have to look at it
