@@ -316,7 +316,9 @@ void setLedColor(int r, int g, int b){
 }
 
 int numberOfLoops(){
-   return ((X_MAX-SCOOP_WIDTH/2) / PLOW_WIDTH - 1);
+   int result = (X_MAX-SCOOP_WIDTH/2) / PLOW_WIDTH - 1;
+   result % 2 != 0 ? result-- : result = result;
+   return (result);
 }
 
 int nextStage(){
