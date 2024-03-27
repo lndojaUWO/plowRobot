@@ -40,40 +40,12 @@ void DriveBot::setPosition(long x, long y) {
     yPosition = y;
 }
 
-void DriveBot::updatePosition(long leftMotor, long rightMotor, float angle, bool isTurning) {
+void DriveBot::updatePosition(long leftMotor, long rightMotor, float angle) {
     long encoderValue = (leftMotor + rightMotor) / 2.0;
     double distance = encoderValue - lastEncoderValue;
-    // if (isTurning == false){
-        xPosition += distance * cos(angle);
-        yPosition += distance * sin(angle);
-    // }
-    //Serial.println(distance);
-    // print left motor, right motor, and encoder values
-    // Serial.print("Left Motor: ");
-    // Serial.print(leftMotor);
-    // Serial.print(" Right Motor: ");
-    // Serial.print(rightMotor);
-    // Serial.print(" Encoder Value: ");
-    // Serial.print(encoderValue);
-    // Serial.print(" Last Encoder Value: ");
-    // Serial.print(lastEncoderValue);
-    
+    xPosition += distance * cos(angle);
+    yPosition += distance * sin(angle);
     lastEncoderValue = encoderValue;  
-
-    //print positions
-    // Serial.print( "X: ");
-    // Serial.print(xPosition);
-    // Serial.print(" Y: ");
-    // Serial.print(yPosition);
-    // Serial.print(" Desired X: ");
-    // Serial.print(desiredXPosition);
-    // Serial.print(" Desired Y: ");
-    // Serial.print(desiredYPosition);
-    // Serial.print(" Current Angle: ");
-    // Serial.print(angle);
-    // Serial.print(" Desired Angle: ");
-    // Serial.println(desiredAngle);
-
 }
 
 void DriveBot::setLastEncoderValue(long leftMotor, long rightMotor) {

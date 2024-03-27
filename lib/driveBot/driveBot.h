@@ -13,8 +13,8 @@ public:
     ~DriveBot();
 
     // Add your public member functions here
-    void setPosition(long leftMotor, long rightMotor);
-    void updatePosition(long leftMotor, long rightMotor, float angle, bool isTurning);
+    void setPosition(long x, long y);
+    void updatePosition(long leftMotor, long rightMotor, float angle);
     void setDesiredX(long x);
     void setDesiredY(long y);
     void setLastEncoderValue(long leftMotor, long rightMotor);

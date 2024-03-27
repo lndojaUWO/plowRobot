@@ -6,30 +6,39 @@
 #include <Wire.h>
 #include <driveBot.h>
 
-#define LEFT_MOTOR_A        35                                                 // GPIO35 pin 28 (J35) Motor 1 A
-#define LEFT_MOTOR_B        36                                                 // GPIO36 pin 29 (J36) Motor 1 B
-#define RIGHT_MOTOR_A       37                                                 // GPIO37 pin 30 (J37) Motor 2 A
-#define RIGHT_MOTOR_B       38                                                 // GPIO38 pin 31 (J38) Motor 2 B
-#define ENCODER_LEFT_A      15                                                 // left encoder A signal is connected to pin 8 GPIO15 (J15)
-#define ENCODER_LEFT_B      16                                                 // left encoder B signal is connected to pin 8 GPIO16 (J16)
-#define ENCODER_RIGHT_A     11                                                 // right encoder A signal is connected to pin 19 GPIO11 (J11)
-#define ENCODER_RIGHT_B     12                                                 // right encoder B signal is connected to pin 20 GPIO12 (J12)
-#define MODE_BUTTON         0                                                  // GPIO0  pin 27 for Push Button 1
-#define MOTOR_ENABLE_SWITCH 3                                                  // DIP Switch S1-1 pulls Digital pin D3 to ground when on, connected to pin 15 GPIO3 (J3)
-#define POT_R1              1                                                  // when DIP Switch S1-3 is on, Analog AD0 (pin 39) GPIO1 is connected to Poteniometer R1
-#define SMART_LED           21                                                 // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
-#define SMART_LED_COUNT     1                                                  // number of SMART LEDs in use
+#define LEFT_MOTOR_A        35  // GPIO35 pin 28 (J35) Motor 1 A
+#define LEFT_MOTOR_B        36  // GPIO36 pin 29 (J36) Motor 1 B
+#define RIGHT_MOTOR_A       37  // GPIO37 pin 30 (J37) Motor 2 A
+#define RIGHT_MOTOR_B       38  // GPIO38 pin 31 (J38) Motor 2 B
+#define ENCODER_LEFT_A      15  // left encoder A signal is connected to pin 8 GPIO15 (J15)
+#define ENCODER_LEFT_B      16  // left encoder B signal is connected to pin 8 GPIO16 (J16)
+#define ENCODER_RIGHT_A     11  // right encoder A signal is connected to pin 19 GPIO11 (J11)
+#define ENCODER_RIGHT_B     12  // right encoder B signal is connected to pin 20 GPIO12 (J12)
+#define MODE_BUTTON         0   // GPIO0  pin 27 for Push Button 1
+#define MOTOR_ENABLE_SWITCH 3   // DIP Switch S1-1 pulls Digital pin D3 to ground when on, connected to pin 15 GPIO3 (J3)
+#define POT_R1              1   // when DIP Switch S1-3 is on, Analog AD0 (pin 39) GPIO1 is connected to Poteniometer R1
+#define SMART_LED           21  // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
+#define SMART_LED_COUNT     1   // number of SMART LEDs in use
 
 // all distances are written in cm
-#define PLOW_WIDTH          15.0                                                 
+// robot important dimensions
+#define PLOW_WIDTH          15.0
+#define WHEEL_DIAMETER      5.0
+#define PULSES_PER_REVOLUTION 1096  // encoder pulses per motor revolution
+#define DISTANCE_CORRECTION 1.18
+#define ROBOT_LENGTH        26.68
+#define ROBOT_WIDTH         17.9
+#define DISTANCE_TO_WHEELS  12.4
+// sorter important dimensions
+#define SCOOP_Y_OFFSET      27.4
+#define SCOOP_WIDTH         18.40
+#define SCOOP_ENTER_Y_OFFSET  30  // how far from the scoop the robot will go to line up
 
 #define X_MAX               80.0
 #define Y_MAX               100.0
 
-#define KP                  40.0                  
+#define KP                  50.0
 
-#define WHEEL_DIAMETER  5.0
-#define PULSES_PER_REVOLUTION 1096                                        // encoder pulses per motor revolution
 
 unsigned int debounceTimer;                                                   
 unsigned long previousMillisGyro;                                                  
@@ -41,16 +50,15 @@ const int MAX_PWM = pow(2, PWM_Resolution) - 1;
 float leftDriveSpeed = 0;                                                  
 float rightDriveSpeed = 0;                                                 
 float targetSpeed;
-bool isTurning = false;
 bool topBottomToggle = false;
 
 
 unsigned int  robotModeIndex = 0;                                              // robot operational state 
-enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN};     // enums that are used so i can use text names in the switch case instead of integers
+enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP, READY_UP};     // enums that are used so i can use text names in the switch case instead of integers
 /*
 This array represents the actions the robot will take in one loop. 
 */
-DriveStage driveLoops[2] = {DRIVE_TO_END, NEXT_COLUMN};
+DriveStage driveLoops[6] = {DRIVE_TO_END, NEXT_COLUMN, READY_UP, LINE_UP, ENTER_SCOOP, EXIT_SCOOP};
 int driveLoopIndex = 0; // which stage in the driveLoop we are at
 bool stageComplete;     // if True, start the next stage in the loop
 int numLoops = 0;     
@@ -70,6 +78,8 @@ bool measureAngle = false;
 float yAcceleration = 0;
 int setAngle = 0;
 
+// define functions
+void drive(double desiredAngle, double setSpeed, bool reverse = false, double threshold = PI/16.0);
 
 
 
@@ -107,18 +117,14 @@ void setup() {
 
 void loop() {
    long motorPosition[] = {0, 0}; // represented in encouder counts
-   int potentiometer = 0; // raw ADC value from potentiometer
-
    noInterrupts();                                                             
    LeftEncoder.getEncoderRawCount();
    RightEncoder.getEncoderRawCount();
    motorPosition[0] = LeftEncoder.lRawEncoderCount;                                                 
    motorPosition[1] = (RightEncoder.lRawEncoderCount) * -1.0;
    interrupts();  
-
-
-   readMPU();
-                                                             
+   
+   readMPU();                                                           
 
    buttonDebounce();
 
@@ -126,7 +132,8 @@ void loop() {
          Bot.Stop("D1");
          LeftEncoder.clearEncoder();                                        
          RightEncoder.clearEncoder();
-         driveBot.setPosition(0,0);
+         driveBot.setPosition(getCM(ROBOT_WIDTH/2.0),getCM(DISTANCE_TO_WHEELS));
+         driveBot.setDesiredX(getCM(ROBOT_WIDTH/2.0));
          driveBot.setLastEncoderValue(0,0);
          // set leds to red
          setLedColor(255, 0, 0);
@@ -137,22 +144,19 @@ void loop() {
          angle = PI/2.0;
    }
    else{
-      potentiometer = analogRead(POT_R1);
-      targetSpeed = map(potentiometer, 0, 4095, 0, 100);
-      
-      
-
+      measureAngle = true;
+      targetSpeed = 70;  
+   
       switch(driveLoops[driveLoopIndex]) {
          case DRIVE_TO_END:
             // set leds to green
             setLedColor(0, 255, 0);
-            measureAngle = true;
             long desiredY;
-            topBottomToggle == false ? desiredY = getCM(Y_MAX) : desiredY = getCM(0);
+            topBottomToggle == false ? desiredY = getCM(Y_MAX-(ROBOT_LENGTH-DISTANCE_TO_WHEELS)) : desiredY = getCM(DISTANCE_TO_WHEELS);
             driveBot.setDesiredY(desiredY);
-            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle, isTurning);
             drive(driveBot.getNewAngle(), targetSpeed);
-            if (driveBot.getDistance() < getCM(0.5)){
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+            if (driveBot.getDistance() < getCM(1)){
                Bot.Stop("D1");
                stageComplete = true;
             }
@@ -160,11 +164,60 @@ void loop() {
          case NEXT_COLUMN:
             // set leds to yellow
             setLedColor(255, 255, 0);
-            measureAngle = true;
-            driveBot.setDesiredX(getCM(PLOW_WIDTH * (numberOfLoops() - numLoops + 1)));
-            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle, isTurning);
-            drive(driveBot.getNewAngle(), targetSpeed);
+            driveBot.setDesiredX(getCM(PLOW_WIDTH * (numberOfLoops() - numLoops+1)+ROBOT_WIDTH/2.0));
+            drive(driveBot.getNewAngle(), targetSpeed, false, PI/32.0);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
             if (driveBot.getDistance() < getCM(1)){
+               Bot.Stop("D1");
+               stageComplete = true;
+            }
+            break;
+         case READY_UP:
+            // set leds to orange
+            setLedColor(255, 165, 0);
+            driveBot.setDesiredX(getCM(X_MAX/2.0));
+            driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
+            drive(driveBot.getNewAngle(), targetSpeed);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+            if (driveBot.getDistance() < getCM(1)){
+               Bot.Stop("D1");
+               stageComplete = true;
+            }
+            break;
+         case LINE_UP:
+            // set leds to blue
+            setLedColor(0, 0, 255);
+            measureAngle = true;
+            driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
+            driveBot.setDesiredX(getCM(X_MAX - SCOOP_WIDTH/2.0));
+            drive(driveBot.getNewAngle(), targetSpeed);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+            if (driveBot.getDistance() < getCM(0.5)){
+               Bot.Stop("D1");
+               stageComplete = true;
+            }
+            break;
+         case ENTER_SCOOP:
+            // set leds to purple
+            setLedColor(255, 0, 255);
+            measureAngle = true;
+            driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET+(ROBOT_LENGTH-DISTANCE_TO_WHEELS)));
+            drive(driveBot.getNewAngle(), targetSpeed, false,PI/32.0);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+            if (driveBot.getDistance() < getCM(0.5)){
+               measureAngle = false;
+               Bot.Stop("D1");
+               stageComplete = true;
+            }
+            break;
+         case EXIT_SCOOP:
+            // set leds to white
+            setLedColor(255, 255, 255);
+            measureAngle = true;
+            driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
+            drive(driveBot.getNewAngle(), targetSpeed, true, PI/32.0);
+            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+            if (driveBot.getDistance() < getCM(0.5)){
                measureAngle = false;
                Bot.Stop("D1");
                stageComplete = true;
@@ -179,8 +232,11 @@ void loop() {
 
 }
 
-void drive(double desiredAngle, double setSpeed){
-   
+void drive(double desiredAngle, double setSpeed, bool reverse, double threshold){
+   if (reverse == true){
+      desiredAngle = constrainAngle(desiredAngle - PI);
+      setSpeed = -setSpeed;
+   }
    float error = desiredAngle - angle;
    if (error > PI) {
    error -= 2.0 * PI;
@@ -189,13 +245,11 @@ void drive(double desiredAngle, double setSpeed){
    }    
 
    float correction;
-   if (abs(error) > PI/16.0){
+   if (abs(error) > threshold){
       setSpeed = 0;
       correction = KP*error*2.0;
-      isTurning = true;
    }
    else{
-      isTurning = false;
       correction = KP*error;
    }
 
@@ -206,7 +260,10 @@ void drive(double desiredAngle, double setSpeed){
    leftDriveSpeed < -100 ? leftDriveSpeed = -100 : leftDriveSpeed = leftDriveSpeed;
    rightDriveSpeed < -100 ? rightDriveSpeed = -100 : rightDriveSpeed = rightDriveSpeed;
 
-   if (leftDriveSpeed < 0){
+   if (leftDriveSpeed < 0 and rightDriveSpeed < 0){
+      Bot.Reverse("D1", toPWM(abs(rightDriveSpeed)), toPWM(abs(leftDriveSpeed)));
+   }
+   else if (leftDriveSpeed < 0){
       Bot.Right("D1", toPWM(rightDriveSpeed),toPWM(abs(leftDriveSpeed)));
    }
    else if (rightDriveSpeed < 0){
@@ -243,7 +300,7 @@ void readMPU(){
 
 // returns the number of encoder counts needed to drive a certain distance
 long getCM(double inCM){ 
-   return((inCM * PULSES_PER_REVOLUTION) / (WHEEL_DIAMETER * PI));
+   return((inCM * PULSES_PER_REVOLUTION*DISTANCE_CORRECTION) / (WHEEL_DIAMETER * PI));
 }
 
 double toCm(long encoderCount){
@@ -259,23 +316,25 @@ void setLedColor(int r, int g, int b){
 }
 
 int numberOfLoops(){
-   return (X_MAX / PLOW_WIDTH - 1);
+   return ((X_MAX-SCOOP_WIDTH/2) / PLOW_WIDTH - 1);
 }
 
 int nextStage(){
    if(stageComplete){
       stageComplete = false;
       driveLoopIndex++;
+      numLoops == 0 and driveLoopIndex == 1 ? driveLoopIndex++ : driveLoopIndex = driveLoopIndex;
       driveLoopIndex == 2 ? topBottomToggle = not topBottomToggle : topBottomToggle = topBottomToggle;
-      if (driveLoopIndex == 2){ // if we have finished the loop
-         if (numLoops == 0){
-            driveLoopIndex = 0;
-            return 9; // if we have done all the loops we return 9 to indicate that we are done
-         }
-         else{
+      if (driveLoopIndex >= 2){ // if we have finished the loop
+         if (numLoops > 0){
             numLoops--;
-            driveLoopIndex = 0;
+            driveLoopIndex = 0;            
          }
+         else if (driveLoopIndex == 6){
+            driveLoopIndex = 0;
+            return 9; // indicates that the robot is done
+         }
+         
       }
    }
    return driveLoopIndex;
