@@ -7,6 +7,8 @@
 #include <Wire.h>
 #include <ESP32Servo.h>
 #include <ScoopDrive.h>
+#include <WiFi.h>
+#include <esp_now.h>
 
 #define MOTOR_A             35  // GPIO35 pin 28 (J35) Motor 1 A
 #define MOTOR_B             36  // GPIO36 pin 29 (J36) Motor 1 B
@@ -19,7 +21,7 @@
 #define SMART_LED_COUNT      1  // number of SMART LEDs in use
 #define commonAnode       true  // set to false if using a common cathode LED
 #define SERVO_PIN           42
-#define SERVO_PAUSE_TIME  1000  // time in milliseconds that the servo will pause in between movements
+#define SERVO_PAUSE_TIME  3000  // time in milliseconds that the servo will pause in between movements
 
 void ARDUINO_ISR_ATTR encoderISR(void* arg);
 
@@ -63,7 +65,18 @@ bool scoopVibrateToggle = false;
 enum stage {ROTATE_SCOOP, START_SORTER, STOP}; 
 stage sorterStage = ROTATE_SCOOP;
 
+// F4:12:FA:48:19:EC MAC Address
 
+// callback function that will be executed when data is received
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+   bool command = false;
+   memcpy(&command, incomingData, sizeof(command));
+   if (command == true){
+         robotModeIndex = 1;
+   }
+
+
+}
 
 void setup() {
    smartLED.begin();                                                           
@@ -72,6 +85,14 @@ void setup() {
 	ESP32PWM::allocateTimer(1);
 	ESP32PWM::allocateTimer(2);
 	ESP32PWM::allocateTimer(3);
+
+   WiFi.mode(WIFI_STA);
+   // Init ESP-NOW
+   if (esp_now_init() != ESP_OK) {
+      Serial.println("Error initializing ESP-NOW");
+      return;
+   }
+   esp_now_register_recv_cb(OnDataRecv);
 
    // color sensor setup
    Wire.begin(47,48);
@@ -144,7 +165,7 @@ void loop() {
          case ROTATE_SCOOP:
             setLedColor(100, 0, 100); // set led to purple
             if (millis() - previousMillisStage > 1000){ // 1 Second delay before scoop starts to turn
-               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.25, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.5, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
                   previousMillisStage = millis();
                   previousMillisServo = millis();
                   sorterStage = START_SORTER;
@@ -154,10 +175,10 @@ void loop() {
 
          case START_SORTER:
             if (readColor()){
-               result = maxColor();
+               result = maxColor(0.5);
                int vibOffset;
                scoopVibrateToggle == false ? vibOffset = 0.125 : vibOffset = -0.125;
-               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(2.25+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(2.5+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
                   scoopVibrateToggle == false ? scoopVibrateToggle = true : scoopVibrateToggle = false;
                }
 
@@ -168,7 +189,7 @@ void loop() {
                   turnServo(1);
                }
             }  
-            if (millis() - previousMillisStage > 10000){ // Sorts for 5 seconds
+            if (millis() - previousMillisStage > 10000){ // Sorts for 10 seconds
                sorterStage = STOP;
             }
             break;
@@ -236,30 +257,16 @@ void turnServo(int choice){
 }
 
 // returns the color with the highest value, rough function for now, will probably have to be changed to more accurately sort
-char maxColor(){
-   if (red > green && red > blue){
-      red = 255;
-      green = 0;
-      blue = 0;
-      return('r');
-   }
-   else if (green > red && green > blue){
-      red = 0;
-      green = 255;
-      blue = 0;
-      return('g');
-   }
-   else if (blue > red && blue > green){
-      red = 0;
-      green = 0;
-      blue = 255;
-      return('b');
+char maxColor(float threshold){
+
+   float sumColor = red + green + blue;
+   float greenPercent = green/sumColor;
+
+   if (greenPercent >= threshold){
+      return 'g';
    }
    else{
-      red = 255;
-      green = 255;
-      blue = 255;
-      return('w');
+      return 'r';
    }
 }
 
