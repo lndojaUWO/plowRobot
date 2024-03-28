@@ -86,13 +86,6 @@ void setup() {
 	ESP32PWM::allocateTimer(2);
 	ESP32PWM::allocateTimer(3);
 
-   WiFi.mode(WIFI_STA);
-   // Init ESP-NOW
-   if (esp_now_init() != ESP_OK) {
-      Serial.println("Error initializing ESP-NOW");
-      return;
-   }
-   esp_now_register_recv_cb(OnDataRecv);
 
    // color sensor setup
    Wire.begin(47,48);
@@ -134,6 +127,13 @@ void setup() {
    sorterServo.setTimerWidth(14);
    sorterServo.setPeriodHertz(50);
    // sorterServo.write(30);
+   WiFi.mode(WIFI_STA);
+   // Init ESP-NOW
+   if (esp_now_init() != ESP_OK) {
+      Serial.println("Error initializing ESP-NOW");
+      return;
+   }
+   esp_now_register_recv_cb(OnDataRecv);
 
    previousMillisColour = millis();
    previousMillisServo = millis();
