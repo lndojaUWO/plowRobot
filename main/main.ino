@@ -5,6 +5,8 @@
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <driveBot.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
 #define LEFT_MOTOR_A        35  // GPIO35 pin 28 (J35) Motor 1 A
 #define LEFT_MOTOR_B        36  // GPIO36 pin 29 (J36) Motor 1 B
@@ -82,12 +84,42 @@ int setAngle = 0;
 // define functions
 void drive(double desiredAngle, double setSpeed, bool reverse = false, double threshold = PI/16.0);
 
+//F4:12:FA:47:AA:D4
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+esp_now_peer_info_t peerInfo;
+
+// callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
 
 
 void setup() {
    Serial.begin(115200);
    smartLED.begin();                                                           
    smartLED.show(); // Initialize all pixels to 'off'
+
+   WiFi.mode(WIFI_STA);
+
+   if (esp_now_init() != ESP_OK){
+      Serial.println("Error initializing ESP-NOW");
+      return;
+   }
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  // Register peer
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
    
   // Set up motors and encoders
    Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); 
@@ -221,6 +253,8 @@ void loop() {
             if (driveBot.getDistance() < getCM(0.5)){
                measureAngle = false;
                Bot.Stop("D1");
+               bool command = true;
+               esp_now_send(peerInfo.peer_addr, (uint8_t *) &command, sizeof(command));
                stageComplete = true;
             }
             break;
