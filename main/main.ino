@@ -174,6 +174,7 @@ void loop() {
             break;
 
          case START_SORTER:
+            setLedColor(0,0,0); // set led to off
             if (readColor()){
                result = maxColor(0.5);
                int vibOffset;
