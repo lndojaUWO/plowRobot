@@ -30,8 +30,8 @@
 #define ROBOT_WIDTH         17.9
 #define DISTANCE_TO_WHEELS  12.4
 // sorter important dimensions
-#define SCOOP_Y_OFFSET      27.4
-#define SCOOP_WIDTH         18.40
+#define SCOOP_Y_OFFSET      23.5
+#define SCOOP_WIDTH         17.8
 #define SCOOP_ENTER_Y_OFFSET  30  // how far from the scoop the robot will go to line up
 
 #define X_MAX               80.0
@@ -58,7 +58,8 @@ enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SC
 /*
 This array represents the actions the robot will take in one loop. 
 */
-DriveStage driveLoops[6] = {DRIVE_TO_END, NEXT_COLUMN, READY_UP, LINE_UP, ENTER_SCOOP, EXIT_SCOOP};
+const int driveLoopSize = 5;
+DriveStage driveLoops[driveLoopSize] = {DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP};
 int driveLoopIndex = 0; // which stage in the driveLoop we are at
 bool stageComplete;     // if True, start the next stage in the loop
 int numLoops = 0;     
@@ -145,7 +146,7 @@ void loop() {
    }
    else{
       measureAngle = true;
-      targetSpeed = 70;  
+      targetSpeed = 80;  
    
       switch(driveLoops[driveLoopIndex]) {
          case DRIVE_TO_END:
@@ -172,24 +173,24 @@ void loop() {
                stageComplete = true;
             }
             break;
-         case READY_UP:
-            // set leds to orange
-            setLedColor(255, 165, 0);
-            driveBot.setDesiredX(getCM(X_MAX/2.0));
-            driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
-            drive(driveBot.getNewAngle(), targetSpeed);
-            driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
-            if (driveBot.getDistance() < getCM(1)){
-               Bot.Stop("D1");
-               stageComplete = true;
-            }
-            break;
+         // case READY_UP:
+         //    // set leds to orange
+         //    setLedColor(255, 165, 0);
+         //    driveBot.setDesiredX(getCM(X_MAX/2.0));
+         //    driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
+         //    drive(driveBot.getNewAngle(), targetSpeed);
+         //    driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
+         //    if (driveBot.getDistance() < getCM(1)){
+         //       Bot.Stop("D1");
+         //       stageComplete = true;
+         //    }
+         //    break;
          case LINE_UP:
             // set leds to blue
             setLedColor(0, 0, 255);
             measureAngle = true;
             driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
-            driveBot.setDesiredX(getCM(X_MAX - SCOOP_WIDTH/2.0));
+            driveBot.setDesiredX(getCM(X_MAX - (SCOOP_WIDTH/2.0)));
             drive(driveBot.getNewAngle(), targetSpeed);
             driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
             if (driveBot.getDistance() < getCM(0.5)){
@@ -202,9 +203,9 @@ void loop() {
             setLedColor(255, 0, 255);
             measureAngle = true;
             driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET+(ROBOT_LENGTH-DISTANCE_TO_WHEELS)));
-            drive(driveBot.getNewAngle(), targetSpeed, false,PI/32.0);
+            drive(3.0*PI/2.0, targetSpeed, false,PI/32.0);
             driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
-            if (driveBot.getDistance() < getCM(0.5)){
+            if (driveBot.getDistance() < getCM(1.0)){
                measureAngle = false;
                Bot.Stop("D1");
                stageComplete = true;
@@ -332,7 +333,7 @@ int nextStage(){
             numLoops--;
             driveLoopIndex = 0;            
          }
-         else if (driveLoopIndex == 6){
+         else if (driveLoopIndex == driveLoopSize){
             driveLoopIndex = 0;
             return 9; // indicates that the robot is done
          }
