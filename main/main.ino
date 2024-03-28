@@ -255,7 +255,7 @@ void loop() {
                measureAngle = false;
                Bot.Stop("D1");
                bool command = true;
-               esp_now_send(peerInfo.peer_addr, (uint8_t *) &command, sizeof(command));
+               Serial.println(esp_now_send(peerInfo.peer_addr, (uint8_t *) &command, sizeof(command)));
                stageComplete = true;
             }
             break;
