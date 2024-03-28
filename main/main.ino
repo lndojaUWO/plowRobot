@@ -84,8 +84,9 @@ int setAngle = 0;
 // define functions
 void drive(double desiredAngle, double setSpeed, bool reverse = false, double threshold = PI/16.0);
 
-//F4:12:FA:47:AA:D4
-uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+//F4:12:FA:47:AA:D4 MAC Address
+// F4:12:FA:48:19:EC RECEIVER MAC Address
+uint8_t broadcastAddress[] = {0xF4, 0x12, 0xFA, 0x48, 0x19, 0xEC};
 esp_now_peer_info_t peerInfo;
 
 // callback when data is sent
