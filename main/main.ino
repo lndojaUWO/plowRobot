@@ -21,7 +21,7 @@
 #define SMART_LED_COUNT      1  // number of SMART LEDs in use
 #define commonAnode       true  // set to false if using a common cathode LED
 #define SERVO_PIN           42
-#define SERVO_PAUSE_TIME  3000  // time in milliseconds that the servo will pause in between movements
+#define SERVO_PAUSE_TIME  2500  // time in milliseconds that the servo will pause in between movements
 
 void ARDUINO_ISR_ATTR encoderISR(void* arg);
 
@@ -32,6 +32,7 @@ unsigned int previousMillisColour;
 unsigned int currentMillisColour;
 unsigned int previousMillisServo;
 unsigned int currentMillisServo;
+unsigned int previousMillisServoVibrate;
 unsigned int previousMillisStage;
 
 // DC Motor and Encoder Constants
@@ -65,6 +66,8 @@ bool scoopVibrateToggle = false;
 enum stage {ROTATE_SCOOP, START_SORTER, STOP}; 
 stage sorterStage = ROTATE_SCOOP;
 
+const float greenValue = 0.35;
+// 0.37
 // F4:12:FA:48:19:EC MAC Address
 
 // callback function that will be executed when data is received
@@ -96,6 +99,7 @@ void setup() {
       while (1); // halt!
    }
    
+   
    // motor and encoder setup
    scoopMotor.begin();
    pinMode(encoder.channalA, INPUT);                   
@@ -126,6 +130,7 @@ void setup() {
    sorterServo.attach(SERVO_PIN);
    sorterServo.setTimerWidth(14);
    sorterServo.setPeriodHertz(50);
+   sorterServo.write(45);
    // sorterServo.write(30);
    WiFi.mode(WIFI_STA);
    // Init ESP-NOW
@@ -155,7 +160,14 @@ void loop() {
       setLedColor(100, 100, 100);
       robotModeIndex = 0;
       previousMillisStage = millis();
+      previousMillisServoVibrate = millis();
       sorterStage = ROTATE_SCOOP;
+      if (readColor()){
+         // print the normalized rgb values 
+         Serial.print("R: "); Serial.print(red/255.0);
+         Serial.print(" G: "); Serial.print(green/255.0);
+         Serial.print(" B: "); Serial.println(blue/255.0);
+      }
    }
 
    // Operational Mode
@@ -165,7 +177,7 @@ void loop() {
          case ROTATE_SCOOP:
             setLedColor(100, 0, 100); // set led to purple
             if (millis() - previousMillisStage > 1000){ // 1 Second delay before scoop starts to turn
-               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.5, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.75, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
                   previousMillisStage = millis();
                   previousMillisServo = millis();
                   sorterStage = START_SORTER;
@@ -176,7 +188,7 @@ void loop() {
          case START_SORTER:
             setLedColor(0,0,0); // set led to off
             if (readColor()){
-               result = maxColor(0.5);
+               result = compareColor(green/255.0);
                int vibOffset;
                scoopVibrateToggle == false ? vibOffset = 0.125 : vibOffset = -0.125;
                if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(2.5+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
@@ -190,7 +202,7 @@ void loop() {
                   turnServo(1);
                }
             }  
-            if (millis() - previousMillisStage > 10000){ // Sorts for 10 seconds
+            if (millis() - previousMillisStage > 20000){ // Sorts for 10 seconds
                sorterStage = STOP;
             }
             break;
@@ -199,6 +211,7 @@ void loop() {
             // Serial.println("STOP");
             setLedColor(100, 0, 100); // set led to purple
             if (scoopMotor.driveTo(0, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){ // Drive Scoop back to start
+               sorterServo.write(45); // reset servo to middle position
                robotModeIndex = 0;
             }
             break;
@@ -241,7 +254,7 @@ void turnServo(int choice){
             servoToggle = true;
          }
          else{
-            sorterServo.write(45);
+            vibrateServo();  
          }
          break;
       case 1:
@@ -251,25 +264,40 @@ void turnServo(int choice){
             servoToggle = true;
          }
          else{
-            sorterServo.write(45);
+            vibrateServo();
          }
          break;
    }
 }
 
-// returns the color with the highest value, rough function for now, will probably have to be changed to more accurately sort
-char maxColor(float threshold){
+void vibrateServo(){   
+   if (millis() - previousMillisServoVibrate > 100){
+      sorterServo.write(42);
+      if (millis() - previousMillisServoVibrate > 200){
+         sorterServo.write(48);
+         previousMillisServoVibrate = millis();
+      }
+   }
 
-   float sumColor = red + green + blue;
-   float greenPercent = green/sumColor;
+}
 
-   if (greenPercent >= threshold){
+// converts rgb values to a hue
+float toHue(float r, float g, float b){
+   float hue = 0;
+   hue = atan2(sqrt(3)*(g-b), 2*r-g-b);
+
+   return hue;
+}
+
+char compareColor(float g){
+   if (g > greenValue){
       return 'g';
    }
    else{
       return 'r';
    }
 }
+
 
 void setLedColor(int r, int g, int b){
    if (smartLED.getPixelColor(0) != smartLED.Color(g, r, b)){
