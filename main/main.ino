@@ -66,7 +66,7 @@ bool scoopVibrateToggle = false;
 enum stage {ROTATE_SCOOP, START_SORTER, STOP}; 
 stage sorterStage = ROTATE_SCOOP;
 
-const float greenValue = 0.35;
+const float greenValue = 0.39;
 // 0.37
 // F4:12:FA:48:19:EC MAC Address
 
@@ -177,6 +177,7 @@ void loop() {
          case ROTATE_SCOOP:
             setLedColor(100, 0, 100); // set led to purple
             if (millis() - previousMillisStage > 1000){ // 1 Second delay before scoop starts to turn
+               vibrateServo();
                if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.75, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
                   previousMillisStage = millis();
                   previousMillisServo = millis();
@@ -190,8 +191,8 @@ void loop() {
             if (readColor()){
                result = compareColor(green/255.0);
                int vibOffset;
-               scoopVibrateToggle == false ? vibOffset = 0.125 : vibOffset = -0.125;
-               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(2.5+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
+               scoopVibrateToggle == false ? vibOffset = 0.05 : vibOffset = -0.05;
+               if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(1.5+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
                   scoopVibrateToggle == false ? scoopVibrateToggle = true : scoopVibrateToggle = false;
                }
 
@@ -272,9 +273,9 @@ void turnServo(int choice){
 
 void vibrateServo(){   
    if (millis() - previousMillisServoVibrate > 100){
-      sorterServo.write(42);
+      sorterServo.write(43);
       if (millis() - previousMillisServoVibrate > 200){
-         sorterServo.write(48);
+         sorterServo.write(57);
          previousMillisServoVibrate = millis();
       }
    }
