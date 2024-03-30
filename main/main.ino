@@ -24,7 +24,7 @@
 
 // all distances are written in cm
 // robot important dimensions
-#define PLOW_WIDTH          15.0
+#define PLOW_WIDTH          14.0
 #define WHEEL_DIAMETER      5.0
 #define PULSES_PER_REVOLUTION 1096  // encoder pulses per motor revolution
 #define DISTANCE_CORRECTION 1.18
