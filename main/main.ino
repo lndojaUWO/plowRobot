@@ -18,7 +18,6 @@
 #define ENCODER_RIGHT_B     12  // right encoder B signal is connected to pin 20 GPIO12 (J12)
 #define MODE_BUTTON         0   // GPIO0  pin 27 for Push Button 1
 #define MOTOR_ENABLE_SWITCH 3   // DIP Switch S1-1 pulls Digital pin D3 to ground when on, connected to pin 15 GPIO3 (J3)
-#define POT_R1              1   // when DIP Switch S1-3 is on, Analog AD0 (pin 39) GPIO1 is connected to Poteniometer R1
 #define SMART_LED           21  // when DIP Switch S1-4 is on, Smart LED is connected to pin 23 GPIO21 (J21)
 #define SMART_LED_COUNT     1   // number of SMART LEDs in use
 
@@ -27,41 +26,42 @@
 #define PLOW_WIDTH          14.0
 #define WHEEL_DIAMETER      5.0
 #define PULSES_PER_REVOLUTION 1096  // encoder pulses per motor revolution
-#define DISTANCE_CORRECTION 1.18
+#define DISTANCE_CORRECTION 1.18    // the formula i use to convert encoder counts to cm is not perfect, this is a correction factor
 #define ROBOT_LENGTH        26.68
 #define ROBOT_WIDTH         17.9
-#define DISTANCE_TO_WHEELS  12.4
+#define DISTANCE_TO_WHEELS  12.4    // distance from the back of the robot to the wheels
 // sorter important dimensions
-#define SCOOP_Y_OFFSET      23.5
+#define SCOOP_Y_OFFSET      23.5  // how far from y=0 the robot will go to dump the gems
 #define SCOOP_WIDTH         17.8
 #define SCOOP_ENTER_Y_OFFSET  30  // how far from the scoop the robot will go to line up
 
+// zone dimensions
 #define X_MAX               80.0
 #define Y_MAX               100.0
 
-#define KP                  50.0
+#define KP                  50.0 // proportional gain for the PID controller
 
 
 unsigned int debounceTimer;                                                   
 unsigned long previousMillisGyro;                                                  
 unsigned long currentMillisGyro;                                                   
 
-const int PWM_Resolution = 8;                                                  // bit resolution
+const int PWM_Resolution = 8;                                                  
 const int MIN_PWM = 150;                                                       
 const int MAX_PWM = pow(2, PWM_Resolution) - 1;    
 float leftDriveSpeed = 0;                                                  
 float rightDriveSpeed = 0;                                                 
 float targetSpeed;
-bool topBottomToggle = false;
+bool topBottomToggle = false; // determins if the robot is driving to the top or the bottom of the zone during a loop
 
 
-unsigned int  robotModeIndex = 0;                                              // robot operational state 
-enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP, READY_UP};     // enums that are used so i can use text names in the switch case instead of integers
+unsigned int  robotModeIndex = 0; // robot operational state 
+enum DriveStage { STOP, DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP, READY_UP}; // enums that are used so i can use text names in the switch case instead of integers
 /*
 This array represents the actions the robot will take in one loop. 
 */
 const int driveLoopSize = 5;
-DriveStage driveLoops[driveLoopSize] = {DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP};
+DriveStage driveLoops[driveLoopSize] = {DRIVE_TO_END, NEXT_COLUMN, LINE_UP, ENTER_SCOOP, EXIT_SCOOP}; // the robot will only do actions LINE_UP and onwards once it has completed its sweep
 int driveLoopIndex = 0; // which stage in the driveLoop we are at
 bool stageComplete;     // if True, start the next stage in the loop
 int numLoops = 0;     
@@ -70,13 +70,13 @@ Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_G
 
 // Motor, encoder, and IR objects (classes defined in MSE2202_Lib)
 Motion Bot = Motion();
-DriveBot driveBot = DriveBot();                                                         
+DriveBot driveBot = DriveBot(); // library i wrote to help with the determining the robot's position and where it needs to go                                                      
 Encoders LeftEncoder = Encoders();                                             
 Encoders RightEncoder = Encoders();         
 
 // MPU6050 IMU Sensor
 Adafruit_MPU6050 mpu;                                                          // I2C address 0x68
-float angle = PI/2.0;
+float angle = PI/2.0; // inital value, the robot will start facing the top of the zone
 bool measureAngle = false;
 float yAcceleration = 0;
 int setAngle = 0;
@@ -84,7 +84,6 @@ int setAngle = 0;
 // define functions
 void drive(double desiredAngle, double setSpeed, bool reverse = false, double threshold = PI/16.0);
 
-//F4:12:FA:47:AA:D4 MAC Address
 // F4:12:FA:48:19:EC RECEIVER MAC Address
 uint8_t broadcastAddress[] = {0xF4, 0x12, 0xFA, 0x48, 0x19, 0xEC};
 esp_now_peer_info_t peerInfo;
@@ -99,38 +98,41 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
 void setup() {
    Serial.begin(115200);
-   smartLED.begin();                                                           
+   smartLED.begin();
    smartLED.show(); // Initialize all pixels to 'off'
 
    WiFi.mode(WIFI_STA);
 
-   if (esp_now_init() != ESP_OK){
+   if (esp_now_init() != ESP_OK) {
       Serial.println("Error initializing ESP-NOW");
       return;
    }
-  // Once ESPNow is successfully Init, we will register for Send CB to
-  // get the status of Trasnmitted packet
-  esp_now_register_send_cb(OnDataSent);
-  // Register peer
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;  
-  peerInfo.encrypt = false;
-  
-  // Add peer        
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    Serial.println("Failed to add peer");
-    return;
-  }
-   
-  // Set up motors and encoders
-   Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B); 
-   LeftEncoder.Begin(ENCODER_LEFT_A, ENCODER_LEFT_B, &Bot.iLeftMotorRunning ); 
-   RightEncoder.Begin(ENCODER_RIGHT_A, ENCODER_RIGHT_B, &Bot.iRightMotorRunning ); 
+
+   // Once ESPNow is successfully Init, we will register for Send CB to
+   // get the status of Trasnmitted packet
+   esp_now_register_send_cb(OnDataSent);
+
+   // Register peer
+   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+   peerInfo.channel = 0;
+   peerInfo.encrypt = false;
+
+   // Add peer
+   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+      Serial.println("Failed to add peer");
+      return;
+   }
+
+   // Set up motors and encoders
+   Bot.driveBegin("D1", LEFT_MOTOR_A, LEFT_MOTOR_B, RIGHT_MOTOR_A, RIGHT_MOTOR_B);
+   LeftEncoder.Begin(ENCODER_LEFT_A, ENCODER_LEFT_B, &Bot.iLeftMotorRunning);
+   RightEncoder.Begin(ENCODER_RIGHT_A, ENCODER_RIGHT_B, &Bot.iRightMotorRunning);
    pinMode(MOTOR_ENABLE_SWITCH, INPUT_PULLUP);
    pinMode(MODE_BUTTON, INPUT_PULLUP);
 
-  Wire.begin(47,48);
-   // connect to mpu
+   Wire.begin(47, 48); // i2c pins on the MSEDuino
+
+   // Connect to MPU
    if (!mpu.begin()) {
       Serial.println("Failed to find MPU6050 chip");
       while (1) {
@@ -141,7 +143,6 @@ void setup() {
    mpu.setGyroRange(MPU6050_RANGE_250_DEG);
    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 
-
    debounceTimer = 0;
    numLoops = numberOfLoops();
    stageComplete = false;
@@ -151,6 +152,7 @@ void setup() {
 
 void loop() {
    long motorPosition[] = {0, 0}; // represented in encouder counts
+   // get encoder counts
    noInterrupts();                                                             
    LeftEncoder.getEncoderRawCount();
    RightEncoder.getEncoderRawCount();
@@ -158,7 +160,7 @@ void loop() {
    motorPosition[1] = (RightEncoder.lRawEncoderCount) * -1.0;
    interrupts();  
    
-   readMPU();                                                           
+   readMPU(); // reads angle from MPU6050                                                           
 
    buttonDebounce();
 
@@ -179,7 +181,7 @@ void loop() {
    }
    else{
       measureAngle = true;
-      targetSpeed = 80;  
+      targetSpeed = 80; // speed the robot will try to achieve out of 100  
    
       switch(driveLoops[driveLoopIndex]) {
          case DRIVE_TO_END:
@@ -206,19 +208,7 @@ void loop() {
                stageComplete = true;
             }
             break;
-         // case READY_UP:
-         //    // set leds to orange
-         //    setLedColor(255, 165, 0);
-         //    driveBot.setDesiredX(getCM(X_MAX/2.0));
-         //    driveBot.setDesiredY(getCM(SCOOP_Y_OFFSET + SCOOP_ENTER_Y_OFFSET));
-         //    drive(driveBot.getNewAngle(), targetSpeed);
-         //    driveBot.updatePosition(motorPosition[0], motorPosition[1], angle);
-         //    if (driveBot.getDistance() < getCM(1)){
-         //       Bot.Stop("D1");
-         //       stageComplete = true;
-         //    }
-         //    break;
-         case LINE_UP:
+         case LINE_UP: // positions the robot so that it can drive in a straight line into the scoop
             // set leds to blue
             setLedColor(0, 0, 255);
             measureAngle = true;
@@ -270,10 +260,11 @@ void loop() {
 
 void drive(double desiredAngle, double setSpeed, bool reverse, double threshold){
    if (reverse == true){
-      desiredAngle = constrainAngle(desiredAngle - PI);
+      desiredAngle = constrainAngle(desiredAngle - PI); // flips the desired angle by 180 degrees
       setSpeed = -setSpeed;
    }
    float error = desiredAngle - angle;
+   // ensure the robot will turn in the shortest direction
    if (error > PI) {
    error -= 2.0 * PI;
    } else if (error < -PI) {
@@ -281,6 +272,7 @@ void drive(double desiredAngle, double setSpeed, bool reverse, double threshold)
    }    
 
    float correction;
+   // if the robot needs to turn more than the threshold amount it will turn on the spot instead of turning while driving
    if (abs(error) > threshold){
       setSpeed = 0;
       correction = KP*error*2.0;
@@ -291,11 +283,13 @@ void drive(double desiredAngle, double setSpeed, bool reverse, double threshold)
 
    leftDriveSpeed = setSpeed - correction;
    rightDriveSpeed = setSpeed + correction;
+   // ensure speeds cant go over 100 or -100
    leftDriveSpeed > 100 ? leftDriveSpeed = 100 : leftDriveSpeed = leftDriveSpeed;
    rightDriveSpeed > 100 ? rightDriveSpeed = 100 : rightDriveSpeed = rightDriveSpeed;
    leftDriveSpeed < -100 ? leftDriveSpeed = -100 : leftDriveSpeed = leftDriveSpeed;
    rightDriveSpeed < -100 ? rightDriveSpeed = -100 : rightDriveSpeed = rightDriveSpeed;
 
+   // pick the correct function depending on the wheel drive speeds
    if (leftDriveSpeed < 0 and rightDriveSpeed < 0){
       Bot.Reverse("D1", toPWM(abs(rightDriveSpeed)), toPWM(abs(leftDriveSpeed)));
    }
@@ -312,7 +306,7 @@ void drive(double desiredAngle, double setSpeed, bool reverse, double threshold)
 
 }
 
-
+// converts a percentage speed to a PWM value
 unsigned char toPWM(float speed){
    unsigned char result = map(speed, 0, 100, MIN_PWM, MAX_PWM);
    return (result);
@@ -322,13 +316,10 @@ void readMPU(){
    sensors_event_t a , g, temp;
    mpu.getEvent(&a, &g, &temp);
 
-   yAcceleration = a.acceleration.y;   
-
    float angularVelocity = g.gyro.z;
-   angularVelocity += 0.0048; // offset
+   angularVelocity += 0.0048; // offset to counter drift
    currentMillisGyro = millis();
    float changeInAngle = angularVelocity * (currentMillisGyro - previousMillisGyro) / 1000;
-   changeInAngle = changeInAngle;
    measureAngle == true ? angle += changeInAngle : angle = angle;
    angle = constrainAngle(angle);
    previousMillisGyro = currentMillisGyro;
@@ -339,11 +330,6 @@ long getCM(double inCM){
    return((inCM * PULSES_PER_REVOLUTION*DISTANCE_CORRECTION) / (WHEEL_DIAMETER * PI));
 }
 
-double toCm(long encoderCount){
-   double result = (encoderCount * WHEEL_DIAMETER * PI) / (PULSES_PER_REVOLUTION);
-   return (result);
-}
-
 void setLedColor(int r, int g, int b){
    if (smartLED.getPixelColor(0) != smartLED.Color(r, g, b)){
       smartLED.setPixelColor(0, smartLED.Color(r, g, b));
@@ -352,7 +338,7 @@ void setLedColor(int r, int g, int b){
 }
 
 int numberOfLoops(){
-   int result = (X_MAX-SCOOP_WIDTH/2) / PLOW_WIDTH - 1;
+   int result = (X_MAX-SCOOP_WIDTH) / PLOW_WIDTH - 1;
    result % 2 != 0 ? result-- : result = result;
    return (result);
 }
@@ -378,11 +364,11 @@ int nextStage(){
    return driveLoopIndex;
 }
 
-double constrainAngle(double x){
-    x = fmod(x,2.0*PI);
-    if (x < 0)
-        x += 2.0*PI;
-    return x;
+double constrainAngle(double angleToConstrain){
+    angleToConstrain = fmod(angleToConstrain,2.0*PI);
+    if (angleToConstrain < 0)
+        angleToConstrain += 2.0*PI;
+    return angleToConstrain;
 }
 // placed into the depths so we dont have to look at it
 // reads the button and toggles the robot mode

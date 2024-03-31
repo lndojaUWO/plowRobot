@@ -40,8 +40,9 @@ void DriveBot::setPosition(long x, long y) {
     yPosition = y;
 }
 
+// takes in the distance the robot has traveled and the angle it is facing and then using trig to determine its x,y change in position
 void DriveBot::updatePosition(long leftMotor, long rightMotor, float angle) {
-    long encoderValue = (leftMotor + rightMotor) / 2.0;
+    long encoderValue = (leftMotor + rightMotor) / 2.0; // gets the average of the two encoder values
     double distance = encoderValue - lastEncoderValue;
     xPosition += distance * cos(angle);
     yPosition += distance * sin(angle);
@@ -53,11 +54,12 @@ void DriveBot::setLastEncoderValue(long leftMotor, long rightMotor) {
 }
 
 double DriveBot::getNewAngle() {
-    if (desiredXPosition - xPosition == 0) {
+    if (desiredXPosition - xPosition == 0) { // avoids division by 0
         desiredYPosition - yPosition > 0 ? desiredAngle = PI/2.0 : desiredAngle = 3.0*PI/2.0;
     }
     else{
-        desiredAngle = atan2((desiredYPosition - yPosition), (desiredXPosition - xPosition));
+        // calculates the angle the robot needs to turn to face the desired position
+        desiredAngle = atan2((desiredYPosition - yPosition), (desiredXPosition - xPosition)); 
     }
     desiredAngle = constrainAngle(desiredAngle);
     return (desiredAngle);
@@ -67,9 +69,9 @@ long DriveBot::getDistance() {
     return sqrt(pow(desiredXPosition - xPosition, 2) + pow(desiredYPosition - yPosition, 2));
 }
 
-double DriveBot::constrainAngle(double x){
-    x = fmod(x,2.0*PI);
-    if (x < 0)
-        x += 2.0*PI;
-    return x;
+double DriveBot::constrainAngle(double angleToConstrain){
+    angleToConstrain = fmod(angleToConstrain,2.0*PI);
+    if (angleToConstrain < 0)
+        angleToConstrain += 2.0*PI;
+    return angleToConstrain;
 }
