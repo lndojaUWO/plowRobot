@@ -52,13 +52,11 @@ struct Encoder {
 // Create instances of the classes
 Encoder encoder = {ENCODER_A, ENCODER_B, 0}; // Create an encoder object
 Adafruit_NeoPixel smartLED = Adafruit_NeoPixel(SMART_LED_COUNT, SMART_LED, NEO_GRB + NEO_KHZ800);  
-ScoopDrive scoopMotor = ScoopDrive(MOTOR_A,MOTOR_B);
+ScoopDrive scoopMotor = ScoopDrive(MOTOR_A,MOTOR_B); // library i wrote to handle turning the scoop dc motor
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 Servo sorterServo;
 
-byte gammatable[256];
 float red, green, blue; // for color sensor
-int servoPos = 0;
 char result = 'w';
 bool servoToggle = false;
 bool scoopVibrateToggle = false;
@@ -66,8 +64,7 @@ bool scoopVibrateToggle = false;
 enum stage {ROTATE_SCOOP, START_SORTER, STOP}; 
 stage sorterStage = ROTATE_SCOOP;
 
-const float greenValue = 0.39;
-// 0.37
+const float greenValue = 0.39; // the g value we will be comparing against
 // F4:12:FA:48:19:EC MAC Address
 
 // callback function that will be executed when data is received
@@ -112,26 +109,11 @@ void setup() {
 
    debounceTimer = 0;
 
-   // Color sensor gamma correction, dont ask me how it works i have no clue
-   for (int i=0; i<256; i++) {
-      float x = i;
-      x /= 255;
-      x = pow(x, 2.5);
-      x *= 255;
-
-      if (commonAnode) {
-         gammatable[i] = 255 - x;
-      } else {
-         gammatable[i] = x;
-      }
-      //Serial.println(gammatable[i]);
-   }
    // servo setup
    sorterServo.attach(SERVO_PIN);
    sorterServo.setTimerWidth(14);
    sorterServo.setPeriodHertz(50);
    sorterServo.write(45);
-   // sorterServo.write(30);
    WiFi.mode(WIFI_STA);
    // Init ESP-NOW
    if (esp_now_init() != ESP_OK) {
@@ -152,7 +134,6 @@ void loop() {
    motorPosition = encoder.position; // getting the current encoder position, placed in here so that interupts wont mess with the value                                                 
    interrupts();                                                               
    buttonDebounce();
-   // Serial.println(sorterStage);
    // Default Rest Mode
    if (robotModeIndex == 0){
       scoopMotor.stop();
@@ -172,12 +153,11 @@ void loop() {
 
    // Operational Mode
    else{
-      // Serial.println("operational mode");
       switch (sorterStage){
          case ROTATE_SCOOP:
             setLedColor(100, 0, 100); // set led to purple
             if (millis() - previousMillisStage > 1000){ // 1 Second delay before scoop starts to turn
-               vibrateServo();
+               vibrateServo(); // vibrate the servo back and forth as the gems fall in to minimize jams
                if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*2.75, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){
                   previousMillisStage = millis();
                   previousMillisServo = millis();
@@ -191,7 +171,8 @@ void loop() {
             if (readColor()){
                result = compareColor(green/255.0);
                int vibOffset;
-               scoopVibrateToggle == false ? vibOffset = 0.05 : vibOffset = -0.05;
+               // this offset alternates each loop so that the scoop arm moves back and forth to shake the whole assembly
+               scoopVibrateToggle == false ? vibOffset = 0.05 : vibOffset = -0.05; 
                if (scoopMotor.driveTo(PULSES_PER_REVOLUTION*(1.5+vibOffset), motorPosition, PULSES_PER_REVOLUTION/32, toPWM(100))){
                   scoopVibrateToggle == false ? scoopVibrateToggle = true : scoopVibrateToggle = false;
                }
@@ -209,7 +190,6 @@ void loop() {
             break;
 
          case STOP:
-            // Serial.println("STOP");
             setLedColor(100, 0, 100); // set led to purple
             if (scoopMotor.driveTo(0, motorPosition, PULSES_PER_REVOLUTION/16, toPWM(100))){ // Drive Scoop back to start
                sorterServo.write(45); // reset servo to middle position
@@ -221,15 +201,12 @@ void loop() {
 } // end of main loop
 
 bool readColor(){
-   if (millis() - previousMillisColour > 60) {
+   if (millis() - previousMillisColour > 60) { // read every 60ms
       tcs.setInterrupt(false);  // turn on LED
       tcs.getRGB(&red, &green, &blue);
       tcs.setInterrupt(true);  // turn off LED
       previousMillisColour = millis();
 
-      // Serial.print("R:\t"); Serial.print(int(red)); 
-      // Serial.print("\tG:\t"); Serial.print(int(green)); 
-      // Serial.println("\tB:\t"); Serial.print(int(blue));
       return true;
    }
    return false;
@@ -248,19 +225,18 @@ void turnServo(int choice){
       servoToggle = false;
    }
    switch (choice){
+      // turns the servo to the left or right depending on the choice given
       case 0:
          if (currentMillisServo - previousMillisServo > SERVO_PAUSE_TIME){
-            // Serial.println("Turning Servo");
             sorterServo.write(0);
             servoToggle = true;
          }
          else{
-            vibrateServo();  
+            vibrateServo(); // vibrate the servo when its in the middle position
          }
          break;
       case 1:
          if (currentMillisServo - previousMillisServo > SERVO_PAUSE_TIME){
-            // Serial.println("Turning Servo");
             sorterServo.write(90);
             servoToggle = true;
          }
@@ -271,6 +247,7 @@ void turnServo(int choice){
    }
 }
 
+// move the servo back and forth 2 degrees from the middle position
 void vibrateServo(){   
    if (millis() - previousMillisServoVibrate > 100){
       sorterServo.write(43);
@@ -282,14 +259,6 @@ void vibrateServo(){
 
 }
 
-// converts rgb values to a hue
-float toHue(float r, float g, float b){
-   float hue = 0;
-   hue = atan2(sqrt(3)*(g-b), 2*r-g-b);
-
-   return hue;
-}
-
 char compareColor(float g){
    if (g > greenValue){
       return 'g';
@@ -298,7 +267,6 @@ char compareColor(float g){
       return 'r';
    }
 }
-
 
 void setLedColor(int r, int g, int b){
    if (smartLED.getPixelColor(0) != smartLED.Color(g, r, b)){
@@ -320,10 +288,6 @@ void ARDUINO_ISR_ATTR encoderISR(void* arg) {
    else {                                           // low, lagging channel A
       s->position++;                                      // increase position
    }
-}
-
-int mapToServo(int value){
-   return map(value, 0, 180, 0, 16384);
 }
 
 // placed into the depths so we dont have to look at it

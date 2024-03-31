@@ -1,7 +1,6 @@
 #include "ScoopDrive.h"
 
 ScoopDrive::ScoopDrive(int pinA, int pinB) {
-    // Initialize member variables here if necessary
     motorPinA = pinA;
     motorPinB = pinB;
     ledcChannel = 4;
@@ -9,12 +8,10 @@ ScoopDrive::ScoopDrive(int pinA, int pinB) {
 }
 
 ScoopDrive::~ScoopDrive() {
-    // Clean up resources here if necessary
 }
 
 void ScoopDrive::begin() {
     // Initialize the motor and LEDC here
-    // For example, set the motor pins as OUTPUT and setup the LEDC
     ledcAttachPin(motorPinA, ledcChannel);
     ledcSetup(ledcChannel, pwmFrequency, 8); // 8 bit resolution
     ledcAttachPin(motorPinB,ledcChannel+1);
@@ -24,6 +21,7 @@ void ScoopDrive::begin() {
 bool ScoopDrive::driveTo(long distance, long motorPosition, long threshold, unsigned char pwmValue) {
     long difference = distance - motorPosition;
 
+    // determines if the motor should move forward or backward to go towards the desired position
     if (difference > 0 and difference > threshold) {
         ledcWrite(ledcChannel,pwmValue);
         ledcWrite(ledcChannel+1, 0);
@@ -34,7 +32,7 @@ bool ScoopDrive::driveTo(long distance, long motorPosition, long threshold, unsi
         ledcWrite(ledcChannel+1,pwmValue);
         return false;
     }
-    else{
+    else{  // if the motor is within the threshold, stop the motor
         ledcWrite(ledcChannel,0);
         ledcWrite(ledcChannel+1,0);
         return true;
